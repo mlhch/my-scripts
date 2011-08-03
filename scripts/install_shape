@@ -1,0 +1,100 @@
+#! /bin/bash
+
+for arg in $*; do
+	if [ "$arg" = "--no-data" ]; then
+		with_data=0
+		continue
+	fi
+	if [ "${arg%=*}" = "--shape-dir" ]; then
+		__shape_dir=${arg#*=}
+		continue
+	fi
+done
+
+if [ -z "$__shape_dir" ]; then
+	echo "Please specify parameter --shape-dir=..."
+	exit
+fi
+
+. ./lib
+. ./install_pgsql
+
+
+shapes=$(ls $__shape_dir | grep ".shp$")
+oldIFS=$IFS
+IFS=$'\n'
+for row in $shapes; do
+	tbname=$(echo ${row%.shp} | tr [A-Z] [a-z])
+
+	########## srid:900913
+	sqlfile=$__shape_dir/${tbname}_900913.sql
+	ml_echo "	$pg_dir/bin/shp2pgsql
+			-s 900913
+			-d $__shape_dir/$row
+			$tbname
+			> $sqlfile"
+	if [ -f "$sqlfile" ]; then
+		ml_echo "sql is existing"
+	else
+		$pg_dir/bin/shp2pgsql -s 900913 -d $__shape_dir/$row $tbname > $sqlfile
+	fi
+	
+	ml_echo "	$pg_bin
+			-f $sqlfile
+			-d postgis -U postgres"
+	tb_exists=$($pg_bin -U postgres -d postgis -c \\d | grep "\<$tbname\>")
+	if [ -z "$tb_exists" ]; then
+		$pg_bin -f $sqlfile -d postgis -U postgres
+	else
+		ml_echo "table is existing"
+	fi
+
+	########## srid:3401
+	sqlfile=$__shape_dir/${tbname}_3401.sql
+	ml_echo "	$pg_dir/bin/shp2pgsql
+			-s 3401
+			-d $__shape_dir/$row
+			${tbname}_3401
+			> $sqlfile"
+	if [ -f "$sqlfile" ]; then
+		ml_echo "sql is existing"
+	else
+		$pg_dir/bin/shp2pgsql -s 3401 -d $__shape_dir/$row ${tbname}_3401 > $sqlfile
+	fi
+	
+	ml_echo "	$pg_bin
+			-f $sqlfile
+			-d postgis -U postgres"
+	s=$($pg_bin -U postgres -d postgis -c \\d | grep "\<${tbname}_3401\>")
+	if [ -z "$tb_exists" ]; then
+		if [ -z "$s" ]; then
+			$pg_bin -f $sqlfile -d postgis -U postgres
+		else
+			ml_echo "table is existing"
+		fi
+	else
+		ml_echo "already updated: $tbname"
+	fi
+
+	########## update
+	ml_echo "	$pg_bin
+			-d postgis -U postgres
+			-c
+			\"UPDATE	$tbname
+			SET		the_geom=ST_Transform(${tbname}_3401.the_geom,900913)
+			FROM	${tbname}_3401
+			WHERE	${tbname}_3401.gid = $tbname.gid;
+			DROP	TABLE	${tbname}_3401\""
+	[ -n "$($pg_bin -U postgres -d postgis -c \\d | grep "\<$tbname\>")" ] \
+		&& [ -n "$($pg_bin -U postgres -d postgis -c \\d | grep "\<${tbname}_3401\>")" ]
+	if [ "$?" = "0" ]; then
+		ml_echo "updating $tbname..."
+		$pg_bin -d postgis -U postgres -c "UPDATE	$tbname \
+			SET		the_geom=ST_Transform(${tbname}_3401.the_geom,900913) \
+			FROM	${tbname}_3401 \
+			WHERE	${tbname}_3401.gid = $tbname.gid; \
+			DROP	TABLE	${tbname}_3401"
+	else
+		ml_echo "already updated: $tbname"
+	fi
+done

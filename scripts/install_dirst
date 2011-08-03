@@ -1,0 +1,9 @@
+#! /bin/bash
+
+
+ruser=Administrator
+rhost=64.46.36.18 #192.168.0.100
+
+scp dirst.php $ruser@$rhost:.
+# ssh $ruser@$rhost C:\\Server\\php\\php.exe dirst.php C:\\Server\\Apache\\htdocs -f -l=100M
+ssh $ruser@$rhost C:\\Server\\php\\php.exe dirst.php C:\\Server\\Apache\\htdocs\\awp -f -l=1M

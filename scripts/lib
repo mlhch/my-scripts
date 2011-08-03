@@ -1,0 +1,952 @@
+#! /bin/bash
+
+
+# base_dir
+if [ -z "$base_dir" ];then
+	pwd=`pwd`
+	base_dir=`dirname $pwd`
+fi
+if [ ! -d "$base_dir/scripts" ];then
+	echo "./scripts does not exists"
+	echo "Please cd to ~/setup/scripts, then execute ./somescript"
+	exit 1
+else
+	###############################################################################
+	# 避免重复包含
+	# void required many times
+	###############################################################################
+	if [ "$__required_functions" = "yes" ];then
+		return 0
+	else
+		__required_functions=yes
+	fi
+fi
+
+# basic constant
+droot=/var/www/html
+dbase=/var/www
+dconf=$base_dir/conf
+dlogs=$base_dir/logs/log
+tmp_dir=$base_dir/tmp
+machine=`uname -m`
+kernelv=`uname -v`
+rpm_dir=$base_dir/linux_$machine/rpms
+mkdir -p $dconf
+mkdir -p $base_dir/logs
+mkdir -p $tmp_dir
+bash_local="/root/.bash_local"
+[ -f $bash_local ] || touch $bash_local
+
+
+# joomla
+ruser=Administrator
+rhost=64.46.36.18 #192.168.0.100
+rroot="C:\\Server\\Apache\\htdocs" #"D:\\www"
+_7z="C:\\Program Files\\7-Zip\\7z"
+rpgbin="C:\\Server\\PostgreSQL\\8.4\\bin"
+joomlamainuser=joomlausr
+joomlamainpswd="jMlA_m)rd)r"
+joomlabrbcuser=brbc_joomla
+joomlabrbcpswd=drE5raTRef
+joomlaseawauser=seawa_joomla
+joomlaseawapswd=t9eveC4fRa
+
+
+# geoserver
+tomcat_cd="$base_dir/common/apache"
+tomcat_gz="apache-tomcat-7.0.12.tar.gz.gz"
+tomcat_dir="/usr/local/${tomcat_gz%.tar.*}"
+geo_host="www.albertawater.com"
+geo_war_zip="geoserver-2.0.3-war.zip"
+geo_cd="$base_dir/common/geoserver"
+geo_bin="geoserver-2.0.3-bin.zip"
+geo_v="geoserver-2.0.3"
+geo_dir="/usr/local/$geo_v"
+geo_datadir="/var/www/data_dir"
+jdk_cd="$base_dir/linux_$machine/java"
+if [ "$machine" = "x86_64" ]; then
+jdk_bin="jdk-6u24-linux-x64.bin"
+jre_bin="jre-6u24-linux-x64.bin"
+jdk_dir="/usr/local/jdk1.6.0_24"
+jre_dir="/usr/local/jre1.6.0_24"
+else
+jdk_bin="jdk-6u25-linux-i586.bin"
+jre_bin="jre-6u25-linux-i586.bin"
+jdk_dir="/usr/local/jdk1.6.0_25"
+jre_dir="/usr/local/jre1.6.0_25"
+fi
+gwc_war_zip="geowebcache-1.2.4-war.zip"
+# http://cdnetworks-kr-1.dl.sourceforge.net/project/geowebcache/geowebcache/1.2.4/geowebcache-1.2.4-war.zip
+#x###################################################################
+#x get rid of the message while using ssh to connect
+#x this seems not to take effect
+if [ 0 = 1 ]; then
+s=`cat /etc/ssh/sshd_config`
+s1=`echo "$s" | grep "GSSAPIAuthentication yes"`
+if [[ "$s1" != \#* ]]; then
+	s=${s/GSSAPIAuthentication yes/\#GSSAPIAuthentication yes}
+fi
+s2=`echo "$s" | grep "GSSAPIAuthentication no"`
+if [[ "$s2" = \#* ]]; then
+	s=${s/\#GSSAPIAuthentication no/GSSAPIAuthentication no}
+fi
+echo "$s" > /etc/ssh/sshd_config
+fi
+
+#x###################################################################
+# function 函数 ml_echo
+#x###################################################################
+ml_echo() {
+	#echo "  "`date +%F\ %T\ .%N` -- $1
+	local msg=$1
+	local type=$2
+	local t=`date +%N`
+	t=${t:0:3}
+	local s=`caller`
+	
+	local i=1
+	local level=""
+	if [ -n "$type" ]; then
+		i=2
+	fi
+	while [ -n "$(caller $i)" ]; do
+		level="$level- "
+		((i++))
+	done
+	
+	local line="${s% *}"
+	s="${s#* }"
+	s="${s#*install_}"
+	s="${s#*/}"	#./lib
+	
+	echo "  `date +%T` .$t $level$msg ($line@$s)"
+}
+ml_echo "Welcome. Setup will start." -1
+
+latest_tar() {
+	local path=$1
+	local prefix=$2
+	
+	s=$(ls -vr $path)
+	local oldIFS=$IFS
+	IFS=$'\r\n'
+	for row in $s; do
+		[[ "$row" = $prefix* ]] && echo $row && return 0
+	done
+	
+	echo "latest source file $path/$prefix not found"
+	exit 1
+}
+
+cmd_exists() {
+  cmd=$1
+
+  oldIFS=$IFS
+  IFS=":"
+
+  retval=0
+  for directory in $PATH; do
+    if [ -x $directory/$cmd ] ; then
+      retval=1 # ÔÚÖž¶šµÄÄ¿ÂŒ($directory)ÖÐÕÒµœÖžÁî($cmd),·µ»Ø0
+      break
+    fi
+  done
+
+  IFS=$oldIFS
+  return $retval
+}
+# x############################################################################
+# function 函数 ml_scp
+# x############################################################################
+ml_scp() {
+	local rdir=$1 # 远程路径
+	local _fnamevar=$2
+	
+	# 根据路径名取得文件名
+	local fname=${rdir//\\/.}
+	fname=${fname//:/}
+	fname=${fname// /-}
+	
+	local f="$dbase/$fname.tar.gz"
+	if [ ! -z "$_fnamevar" ];then
+		eval $_fnamevar='"$f"'
+	fi
+	
+	if [ -f "$f" ]
+	then
+		ml_echo "file $f is existing"
+	else
+		# 本地 tar.gz 不存在时，查看远端文件是否存在
+		file_exists "$tbname.sql"
+		if [ $_gz = 1 ];then
+			# 远端 tar.gz 存在
+			ml_echo "remote $fname.tar.gz is existing"
+		else
+			# 远端 tar.gz 不存在
+			ml_echo "creating remote $fname.tar.gz ..."
+			rdir=${rdir//\\/\\\\}
+			if [ $_tar = 0 ];then
+				ssh $ruser@$rhost "\"\"$_7z\" a -ttar $fname.tar \"$rdir\" > nul\""
+			fi
+			ssh $ruser@$rhost "\"\"$_7z\" a -tgzip $fname.tar.gz $fname.tar > /nul\""
+			ssh $ruser@$rhost del $fname.tar
+		fi
+		ml_echo "downloading $fname.tar.gz..."
+		scp $ruser@$rhost:$fname.tar.gz $f
+		ssh $ruser@$rhost del $fname.tar.gz
+		ml_echo "downloading $fname.tar.gz complete"
+	fi # 拷贝远程 $fname.tar.gz 到本地完毕
+}
+
+# x############################################################################
+# function file_exists(filename), set _tar, _gz, _dir
+# x 远端家目录下文件是否存在
+# x############################################################################
+file_exists_athome() {
+	local fname=$1
+	local sshtype=$2
+	if [ "$sshtype" = "linux" ]; then
+		local ruser=$ruser2
+		local rhost=$rhost2
+	fi
+	
+	_file=0; _tar=0; _gz=0; _dir=0
+	if [ "$sshtype" = "linux" ]; then
+		local s=$(ssh $ruser@$rhost "ls -all $dbase | grep \" $fname\"")
+	else
+		local s=$(ssh $ruser@$rhost "dir | find \" $fname\"")
+	fi
+	
+	oldIFS=$IFS
+	IFS=$'\r\n'
+	
+	for row in $s; do
+		# ml_echo $row
+		if [[ "$row" = *$fname ]];then
+			_file=1
+		fi
+		if [[ "$row" = *$fname.tar.gz ]];then
+			_gz=1
+		fi
+		if [[ "$row" = *$fname.tar ]];then
+			_tar=1
+		fi
+		if [[ "$row" = *\<DIR\>* ]];then
+			_dir=1
+		fi
+	done
+	IFS=$oldIFS
+}
+file_exists() {
+	local fname=$1
+	local sshtype=$2
+	if [ "$sshtype" = "linux" ]; then
+		local ruser=$ruser2
+		local rhost=$rhost2
+	fi
+	
+	_file=0; _tar=0; _gz=0; _dir=0
+	if [ "$sshtype" = "linux" ]; then
+		local s=$(ssh $ruser@$rhost "ls -all $dbase | grep \" $fname\"")
+	else
+		local s=$(ssh $ruser@$rhost "dir | find \" $fname\"")
+	fi
+	
+	oldIFS=$IFS
+	IFS=$'\r\n'
+	
+	for row in $s; do
+		# ml_echo $row
+		if [[ "$row" = *$fname ]];then
+			_file=1
+		fi
+		if [[ "$row" = *$fname.tar.gz ]];then
+			_gz=1
+		fi
+		if [[ "$row" = *$fname.tar ]];then
+			_tar=1
+		fi
+		if [[ "$row" = *\<DIR\>* ]];then
+			_dir=1
+		fi
+	done
+	IFS=$oldIFS
+}
+check_deps() {
+	local rpm_name=$1
+	local level=$2
+	
+	if [[ "$kernelv" = *Ubuntu* ]]; then
+		check_dpkg $rpm_name
+	else
+		check_rpm $rpm_name
+	fi
+}
+check_rpm() {
+	local rpm_name=$1
+	local level=$2
+	local tmp_rpm_dir=$rpm_dir
+	mkdir -p $tmp_rpm_dir
+	
+	if [[ "$kernelv" = *Ubuntu* ]]; then
+		check_dpkg $rpm_name "" "" $level
+		return 0
+	fi
+	
+	local s=$(rpm -q "$rpm_name"|grep "not installed")
+	
+	if [ -z "$s" ];then
+		ml_echo "$level rpm $rpm_name is installed"
+	else
+		ml_echo "$level $rpm_name..."
+		if [ -d /media/CentOS ]; then
+			s=$(ls -r --sort=version /media/CentOS | grep "^$rpm_name-[0-9]");
+			if [ "$machine" = "i686" ]; then
+				s=$(echo "$s" | grep "i386")
+			else
+				s=$(echo "$s" | grep $machine)
+			fi
+			if [ -n "$s" ]; then
+				if [ -f /media/CentOS/$s ]; then
+					ml_echo "$level cdrom $s..."
+					tmp_rpm_dir="$rpm_dir"
+					mkdir -p $tmp_rpm_dir
+					cp /media/CentOS/$s $tmp_rpm_dir/
+				else
+					ml_echo "Oops? $level $s is not found in /media/CentOS"
+				fi
+			fi
+		fi
+		
+		local s=$(ls -r --sort=version $tmp_rpm_dir | grep "^$rpm_name-[0-9]")
+		if [ -n "$s" ]; then
+			local oldIFS=$IFS
+			IFS=$'\r\n'
+			local fn	# if no this declaration, $row will be all the same
+			for fn in $s; do
+			#	if [[ "$fn" = *$machine* ]]; then
+					ml_echo "$level $fn"
+					if [ $rpm_dir = $tmp_rpm_dir ]; then
+						cp $rpm_dir/$fn ${rpm_dir}2
+					fi
+					local needs=$(rpm -ih --test $tmp_rpm_dir/$fn 2>&1 | grep "is needed by")
+					if [ -n "$needs" ]; then
+						local need
+						local rpm2
+						local rpm3
+						for need in $needs; do
+							need=${need% is needed*}
+							need=${need#	}
+							ml_echo "$level $need is needed"
+							
+							rpm2=${need%% =*}
+							rpm2=${rpm2%% >*}
+							s2=$(rpm -q "$rpm2"|grep "not installed")
+							if [ -z "$s2" ];then
+								if [ "$rpm2" = "$rpm3" ]; then
+									ml_echo "$level $need is ignored"
+								else
+									ml_echo "$level Oops? $(rpm -q $rpm2) is already installed"
+									exit 1
+									#rpm -e --nodeps --allmatches $need
+								fi
+							fi
+							rpm3=$rpm2
+							check_rpm "$rpm2" "- $level"
+						done
+					fi
+					ml_echo "$level rpm -ih '$fn'"
+					rpm -ih $tmp_rpm_dir/$fn
+
+					break # ls -r --sort=version
+			#	fi
+			done
+			IFS=$oldIFS;
+		else
+			ml_echo "$level rpm package $rpm_name is not found in $tmp_rpm_dir, exit"
+			exit 1
+		fi
+	fi
+}
+check_dpkg() {
+	local rpm_name=$1
+	local rpm_ver=$2
+	local rpm_cmp=$3
+	local level=$4
+	
+	ml_echo "$level=== $rpm_name ($rpm_ver) ==="
+	if [ "$rpm_name" = "gcc-c++" ]; then
+		rpm_name=build-essential
+	elif [ "$rpm_name" = "zlib" ]; then
+		rpm_name=zlib1g
+	elif [ "$rpm_name" = "zlib-devel" ]; then
+		rpm_name=zlib1g-dev
+	elif [ "$rpm_name" = "libcurl" ]; then
+		rpm_name=libcurl3
+	elif [ "$rpm_name" = "libcurl-devel" ]; then
+		#rpm_name=libcurl3-dev
+		rpm_name=libcurl4-openssl-dev
+	elif [ "$rpm_name" = "readline-devel" ]; then
+		rpm_name=libreadline6-dev
+	elif [[ "$rpm_name" = *-devel ]]; then
+		rpm_name=${rpm_name%el}
+	fi
+	
+	local s=$(dpkg -l | grep "^ii *\<$rpm_name\> *$rpm_ver ")
+	if [ -n "$s" ]; then
+		ml_echo "$level dpkg:$rpm_name is installed"
+	else
+		#ml_echo "${level}apt-get install -s $rpm_name"
+		local inst=$(apt-get install -s $rpm_name 2>&1)
+		[ -n "$(echo "$inst" | grep "^E: ")" ] && echo "$inst" && exit
+		
+		inst=$(echo "$inst" | grep "^Inst ")
+		#if [ -z "$rpm_ver" ]; then
+			rpm_ver=$(echo "$inst" | grep "Inst $rpm_name ")
+			rpm_ver=${rpm_ver#*(}
+			rpm_ver=${rpm_ver%% *}
+		#fi
+		
+		## possible 2 versions matched
+		## Depends: libssl0.9.8 (= 0.9.8k-7ubuntu8.6), zlib1g-dev
+		## Depends: libssl0.9.8 (= 0.9.8k-7ubuntu8), zlib1g-dev
+		ml_echo "${level}apt-cache show $rpm_name"
+		local depends=$(apt-cache show $rpm_name | grep "^Depends: ")
+		## only need the first line
+		depends=${depends%%$'\n'*}
+		depends=${depends#Depends: }
+		#echo "d:$depends"
+		[ "$?" = "0" ] || exit
+		local deb_name1=
+		if [ -n "$depends" ]; then
+			local oldIFS=$IFS; IFS=$','
+			local row	# if no this declaration, $row will be all the same
+			local flag=0
+			for row in $depends; do
+				row=$(echo $row | grep -o "[^ ]\+\( \+[^ ]\+\)*")
+				local p=${row%% *}
+				local v=${row#*(};v=${v%)*};
+				[ "$row" = "$v" ] && v=
+				if [ -z "$v" ]; then
+					v=$(echo $inst | grep "Inst $p ")
+					v=${v#*(}
+					v=${v%% *}
+					local c=
+				else
+					local c=${v% *}
+					v=${v#* };
+				fi
+				
+				local ii=$(dpkg -l | grep "^ii \+$p\>")
+				if [ -n "$ii" ]; then
+					local iiv=${ii#*$p};iiv=$(echo $iiv | grep -o "[^ ]\+\( \+[^ ]\+\)*");iiv=${iiv%% *}
+					ml_echo "$level● $p [$iiv] ($c $v)"
+					[ -z "$c" ] && continue
+					if [ ">=" = "$c" ]; then
+						[ "$(compare "$iiv" "$v")" = ">" ] && continue
+						[ "$(compare "$iiv" "$v")" = "=" ] && continue
+					fi
+					[ "$(compare "$iiv" "$v")" = "$c" ] && continue
+				else
+					ml_echo "$level○ $p ($c $v) not installed"
+				fi
+				
+				if [ -z "$(echo "$inst" | grep $p)" ]; then
+					ml_echo "$level● $p is cancelled by apt-get install -s"
+					continue
+				fi
+				
+				## g++-4.4 and libstdc++6-4.4-dev depend on each other
+				if [ "$p" = "g++-4.4" ]; then
+					ml_echo "$level. . check_dpkg_file ($p, $c, $v)"
+					check_dpkg_file $p "$c" "$v" "$level. . "
+					deb_name1=$deb_name
+					ml_echo "$level. . check_dpkg_file (libstdc++6-4.4-dev, $c)"
+					check_dpkg_file libstdc++6-4.4-dev "$c" "" "$level. . "
+					ml_echo "$level. . dpkg -i $deb_name1 $deb_name"
+					dpkg -i $base_dir/debs/$deb_name1 $base_dir/debs/$deb_name > $dlogs.deb.$deb_nam1
+					continue
+				elif [ "$p" = "libstdc++6-4.4-dev" ]; then
+					ml_echo "$level. . check_dpkg_file ($p, $c, $v)"
+					check_dpkg_file $p "$c" "$v" "$level. "
+					deb_name1=$deb_name
+					ml_echo "$level. . check_dpkg_file (g++-4.4, $c, )"
+					check_dpkg_file g++-4.4 "$c" "" "$level. . "
+					ml_echo "$level. . dpkg -i $deb_name1 $deb_name"
+					dpkg -i $base_dir/debs/$deb_name1 $base_dir/debs/$deb_name > $dlogs.deb.$deb_nam1
+					continue
+				else
+					ml_echo "$level- - check_dpkg ($p, $v, $c)"
+					check_dpkg $p "$v" "$c" "$level. "
+				fi
+			done
+			IFS=$oldIFS
+		fi
+		
+		ml_echo "${level}check_dpkg_file ($rpm_name, $rpm_ver, $rpm_cmp)"
+		deb_names=
+		check_dpkg_file "$rpm_name" "$rpm_cmp" "$rpm_ver" "$level"
+		if [ -n "$deb_names" ]; then
+			ml_echo "${level}dpkg -i $deb_names"
+			cd $base_dir/debs/
+			echo "dpkg -i $deb_names > /dev/null " > .tmp_cmd
+			. .tmp_cmd
+			rm -f .tmp_cmd
+			cd $base_dir/scripts
+		else
+			ml_echo "${level}dpkg -i $deb_name"
+			dpkg -i $base_dir/debs/$deb_name > $dlogs.deb.$deb_name
+		fi
+	fi
+}
+compare() {
+	local a=$1
+	local b=$2
+	
+	local an=$(echo "$a" | grep -o "[0-9]\+\|[^0-9]\+")
+	local bn=$(echo "$b" | grep -o "[0-9]\+\|[^0-9]\+")
+	#ml_echo "$an, $bn"
+	
+	while [ 1 = 1 ]; do
+		a=${an%%$'\n'*}
+		b=${bn%%$'\n'*}
+		[ "$a" = "$an" ] && a=$an && an=
+		[ "$b" = "$bn" ] && b=$bn && bn=
+		an=${an#*$'\n'}
+		bn=${bn#*$'\n'}
+		#ml_echo "$a, $b"
+		#ml_echo "$an, $bn"
+		
+		[[ "$a" =~ [0-9]+ ]] && [[ "$b" =~ [0-9]+ ]]
+		if [ $? = 0 ]; then
+			[ $a -gt $b ] && echo ">" && return 0
+			[ $a -lt $b ] && echo "<" && return 0
+		else
+			[ "$a" \> "$b" ] && echo ">" && return 0
+			[ "$a" \< "$b" ] && echo "<" && return 0
+		fi
+		
+		[ "$a" = "$an" ] && [ "$b" = "$bn" ] && break
+	done
+	echo "="
+}
+check_dpkg_file() {
+	local rpm_name=$1
+	local compare=$2
+	local ver=$3
+	local level=$4
+	
+	[ -z "$ver" ] || [ "$compare" = ">=" ]
+	if [ "$?" = "0" ]; then
+		local inst=$(apt-get install -s $rpm_name 2>&1)
+		[ -n "$(echo "$inst" | grep "^E: ")" ] && echo "$inst" && exit
+	
+		local instv=$(echo "$inst" | grep "^Inst $rpm_name ")
+		instv=${instv#*(}
+		instv=${instv%% *}
+		if [ "$instv" \< "$ver" ]; then
+			ml_echo "${level}Oops? $instv < $ver"
+			exit 1
+		fi
+		ml_echo "${level}OK, $instv >= $ver"
+		ver=$instv
+	fi
+	
+	ver=${ver/\:/%3a}
+	deb_name=$(ls $base_dir/debs | grep "^${rpm_name}_$ver")
+	if [ -n "$deb_name" ]; then
+		ml_echo "$level▲ $deb_name is existing"
+		return 0
+	else
+		deb_name=$(ls /var/cache/apt/archives | grep "^${rpm_name}_$ver.*\.deb$")
+		if [ -n "$deb_name" ]; then
+			ml_echo "$level△ $deb_name is found in cache"
+			cp /var/cache/apt/archives/$deb_name $base_dir/debs
+		else
+			ml_echo "$level${rpm_name}_$ver is not found"
+			ml_echo "${level}downloading $rpm_name..."
+			
+			apt-get install -dy $rpm_name > $dlogs.apt.download
+			local s=$(apt-get install -s $rpm_name | grep "^Inst ")
+			
+			local oldIFS=$IFS
+			local row
+			IFS=$'\r\n'
+			deb_names=
+			for row in $s; do
+				local v=${row#*(}
+				v=${v%% *}
+				v=${v/\:/%3a}
+				local p=${row% (*}
+				# Inst libssl0.9.8 [0.9.8k-7ubuntu8.5] (0.9.8k-7ubuntu8.6 Ubunt...
+				p=${p% [*}	
+				p=${p#* }
+				deb_name="$(ls /var/cache/apt/archives | grep "^${p}_$v.*\.deb$")"
+				
+				if [ ! -f /var/cache/apt/archives/$deb_name ]; then
+					ml_echo "/var/cache/apt/archives/$deb_name does not exist"
+					ml_echo "$p, $v"
+					exit 1
+				fi
+				ml_echo "${level}copying $deb_name..."
+				if [ ! -f $base_dir/debs/$deb_name ]; then
+					cp /var/cache/apt/archives/$deb_name $base_dir/debs
+				fi
+				
+				if [ -z "$deb_names" ]; then
+					deb_names="${deb_name}"
+				else
+					deb_names="$deb_names ${deb_name}"
+				fi
+			done
+			IFS=$oldIFS
+		fi
+	fi
+}
+# x############################################################################
+# function check_exists(filename)
+# x############################################################################
+check_exists() {
+	local file=$1
+	if [ ! -f "$file" ];then
+		ml_echo "file $file does not exist. exit"
+		exit 1
+	fi
+}
+
+# x############################################################################
+# function get_pg_table(tbname, localdir)
+# x############################################################################
+get_pg_table() {
+	local tbname=$1
+	local ldir=$2
+	
+	# check if table exists
+	export PGPASSWORD=$pg_pw
+	s=$($pg_bin -U postgres -c \\d -d $pg_db | grep " \<$tbname\>")
+	if [ -n "$s" ];then
+		ml_echo "table $tbname is existing"
+		return 0
+	fi
+	
+	if [ -z "$ldir" ];then
+		ldir=$dbase
+	fi
+	mkdir -p $ldir
+	
+	# 若本地 $ldir 目录下已存在，直接返回
+	if [ -f "$ldir/$tbname.sql" ];then
+		ml_echo "$ldir/$tbname.sql is exsiting"
+	else
+		local near=0
+		if [ -n "$rhost2" ]; then
+			# ls: ... No such file or directory
+			local s="$(ssh $ruser2@$rhost2 "ls $ldir/$tbname.tar.gz" 2>&1 | grep "ls:")"
+			if [ -z "$s" ]; then
+				near=1
+			fi
+		fi
+		
+		if [ $near = 1 ]; then
+			ml_echo "downloading $tbname.tar.gz from $ruser2@$rhost2..."
+			scp $ruser2@$rhost2:$ldir/$tbname.tar.gz $ldir 2>/dev/null
+		else
+			ml_echo "dumping table $tbname..."
+			ssh $ruser@$rhost "$rpgbin\\pg_dump.exe -U postgres -t $tbname -f $tbname.sql postgis" 2>/dev/null
+			ml_echo "compressing $tbname.tar..."
+			ssh $ruser@$rhost "\"\"$_7z\" a -ttar $tbname.tar $tbname.sql > nul\"" 2>/dev/null
+			ml_echo "compressing $tbname.tar.gz..."
+			ssh $ruser@$rhost "\"\"$_7z\" a -tgzip $tbname.tar.gz $tbname.tar > /nul\"" 2>/dev/null
+			ml_echo "deleting $tbname.sql and $tbname.tar"
+			ssh $ruser@$rhost del $tbname.tar $tbname.sql 2>/dev/null
+			ml_echo "downloading $tbname.tar.gz into $ldir..."
+			scp $ruser@$rhost:$tbname.tar.gz $ldir/$tbname.tar.gz 2>/dev/null
+			ml_echo "delete remote $tbname.tar.gz"
+			ssh $ruser@$rhost del $tbname.tar.gz 2>/dev/null
+		fi
+		cd $ldir
+		tar xf $ldir/$tbname.tar.gz
+	fi
+	
+	ml_echo "importing $ldir/$tbname.sql"
+	$pg_bin -U postgres -f "$ldir/$tbname.sql" -d $pg_db > /dev/null
+}
+get_table() {
+	local dbname=$1
+	local tbname=$2
+
+	local s=$($lcmysql -uroot -p$lcmysqlpw -e "show databases" | grep "\<$dbname\>")
+	if [ -z "$s" ]; then
+		ml_echo "Database $dbname does not exist. do nothing."
+	else
+		ml_echo "Database $dbname is existing. ok."
+		s=$($lcmysql -uroot -p$lcmysqlpw -e "show tables from $dbname" | grep "\<$tbname\>")
+		if [ -n "$s" ]; then
+			ml_echo "Table $tbname is existing. do nothing"
+		else
+			# check if $dbname.$tbname.sql exists in /var/www/mysql_dbs
+			# if not, then export at remote
+			mkdir -p $mysql_dbs
+			if [ -f $mysql_dbs/$dbname.$tbname.sql ]; then
+				ml_echo "$mysql_dbs/$dbname.$tbname.sql is existing"
+			else
+				local near=0
+				if [ -n "$rhost2" ]; then
+					local s="$(ssh $ruser2@$rhost2 "ls $mysql_dbs | grep \"\<$dbname.$tbname.sql.tar.gz\>\"" 2>/dev/null)"
+					if [ -n "$s" ]; then
+						near=1
+					fi
+				fi
+				
+				if [ $near = 1 ]; then
+					ml_echo "downloading into $mysql_dbs from $ruser2@$rhost2..."
+					scp $ruser2@$rhost2:$mysql_dbs/$dbname.$tbname.sql.tar.gz $mysql_dbs/ 2>/dev/null
+					ml_echo "extracting $dbname.$tbname.sql.tar.gz..."
+					cd $mysql_dbs
+					tar -xf $dbname.$tbname.sql.tar.gz
+				else
+					ml_echo "start remote mysql exporting..."
+					ssh $ruser@$rhost "C:\\Server\\mysql\\bin\\mysqldump.exe -uroot -p$mysqlrp $dbname $tbname > $dbname.$tbname.sql"
+					rget $dbname.$tbname.sql $mysql_dbs
+					mv $dbase/$dbname.$tbname.sql.tar.gz $mysql_dbs
+				fi
+			fi
+			ml_echo "creating table $dbname.$tbname and importing data..."
+			$lcmysql -uroot -p$lcmysqlpw $dbname < $mysql_dbs/$dbname.$tbname.sql
+			ml_echo "finished"
+		fi
+	fi
+}
+rget() {
+	local rdir=$1 # remote directory
+	local ldir=$2 # local directory's parent directory
+	local action=$3
+	
+	# get filename from directory name
+	local fname=${rdir//\\/.}	# change all \ to .
+	fname=${fname//\//.}			# change all / to .
+	fname=${fname//:/}			# remove :
+	fname=${fname// /-}			# change " " to -
+	local basename=${rdir##*/}
+	basename=${basename##*\\}
+	
+	# default local directory
+	if [ -z "$ldir" ];then
+		ldir=$droot
+	fi
+	ml_echo "rget $rdir" "function"
+	
+	# if target directory/file is existing
+	if [ -a "$ldir/$basename" ];then
+		ml_echo "$ldir/$basename is exsiting"
+		if [ "$action" = "extract" ]; then
+			ml_echo "extracting $dbase/$fname.tar.gz..."
+			cd $ldir
+			tar xf $dbase/$fname.tar.gz
+		fi
+	elif [ -f "$dbase/$fname.tar.gz" ];then
+		ml_echo "extracting $dbase/$fname.tar.gz..."
+		cd $ldir
+		tar xf $dbase/$fname.tar.gz
+	# local has nothing, need downloading from remote
+	else
+		local near=0
+		if [ -n "$rhost2" ]; then
+			ml_echo "detecting status on $ruser2@$rhost2..."
+			local s="$(ssh $ruser2@$rhost2 "ls $dbase | grep \"\<$fname\>\"" 2>/dev/null)"
+			if [ -n "$s" ]; then
+				near=1
+			fi
+		fi
+		
+		if [ $near = 1 ]; then
+			ml_echo "downloading into $dbase from $ruser2@$rhost2..."
+			scp $ruser2@$rhost2:$dbase/$fname.tar.gz $dbase/$fname.tar.gz 2>/dev/null
+		else
+			ml_echo "check remote if exists..."
+			local s=$(ssh $ruser@$rhost "dir $rdir|find \"File Not Found\"")
+			if [ -z "$s" ];then
+				ml_echo "existing"
+			else
+				ml_echo "not existing"
+				return 1
+			fi
+			ml_echo "compressing as $fname.tar.gz ..."
+			ssh $ruser@$rhost "\"\"$_7z\" a -ttar $fname.tar \"$rdir\" > nul && \"$_7z\" a -tgzip $fname.tar.gz $fname.tar > nul && del $fname.tar\""
+			ml_echo "downloading into $dbase"
+			scp $ruser@$rhost:$fname.tar.gz $dbase
+			ssh $ruser@$rhost del $fname.tar.gz
+		fi
+		
+		ml_echo "extracting..."
+		mkdir -p $ldir
+		cd $ldir
+		tar -xf $dbase/$fname.tar.gz
+	fi
+}
+remove_db() {
+	local dbname=$1
+	
+	ml_echo "removing database $dbname..."
+	local s=$($lcmysql -uroot -p$lcmysqlpw -e "show databases" 2>/dev/null | grep "\<$dbname\>")
+	if [ -n "$s" ]; then
+		local mysql_dbs=$dbase/mysql_dbs
+		rm -f $mysql_dbs/$dbname.sql
+		ml_echo "$mysql_dbs/$dbname.sql is removed"
+		$lcmysql -uroot -p$lcmysqlpw -e "DROP DATABASE $dbname"
+		ml_echo "Database $dbname is dropped"
+	else
+		ml_echo "Database $dbname does not exist"
+	fi
+}
+get_db() {
+	local dbname=$1
+	local extraparam=$2
+	
+	ml_echo "getting database $dbname $extraparam..."
+	local s=$($lcmysql -uroot -p$lcmysqlpw -e "show databases" 2>&1)
+	local e=$(echo "$s" | grep "Access denied")
+	if [ -n "$e" ]; then
+		ml_echo "$s"
+		exit
+	fi
+	local s=$(echo "$s" | grep "\<$dbname\>")
+
+	if [ -z "$s" ]; then
+		# check if $dbname.sql exists in /var/www/mysql_tables
+		# if not, then export at remote
+		local mysql_dbs=$dbase/mysql_dbs
+		mkdir -p $mysql_dbs
+		if [ -f $mysql_dbs/$dbname.sql ]; then
+			ml_echo "$mysql_dbs/$dbname.sql is existing"
+		else
+			local near=0
+			if [ -n "$rhost2" ]; then
+				# ls: ... No such file or directory
+				local s="$(ssh $ruser2@$rhost2 "ls $mysql_dbs | grep \"\<$dbname.sql.tar.gz\>\"" 2>/dev/null)"
+				if [ -n "$s" ]; then
+					near=1
+				fi
+			fi
+			
+			if [ $near = 1 ]; then
+				ml_echo "downloading into $mysql_dbs from $ruser2@$rhost2..."
+				scp $ruser2@$rhost2:$mysql_dbs/$dbname.sql.tar.gz $mysql_dbs/ 2>/dev/null
+				cd $mysql_dbs
+				tar -xf $dbname.sql.tar.gz
+			else
+				ml_echo "start remote databae $dbname exporting..."
+				ssh $ruser@$rhost "C:\\Server\\mysql\\bin\\mysqldump.exe --databases -uroot -p$mysqlrp $extraparam $dbname > $dbname.sql"
+				rget $dbname.sql $mysql_dbs
+			fi
+		fi
+		
+		ml_echo "creating database $dbname and importing data..."
+		$lcmysql -uroot -p$lcmysqlpw -e "CREATE DATABASE $dbname DEFAULT CHARACTER SET utf8 COLLATE utf8_general_ci"
+		$lcmysql -uroot -p$lcmysqlpw $dbname < $mysql_dbs/$dbname.sql
+		ml_echo "finished"
+	else
+		ml_echo "Database $dbname is existing"
+	fi
+}
+set_db_user() {
+	local user=$1
+	local pswd=$2
+	
+	local s=`$lcmysql -uroot -p$lcmysqlpw -e "select user from mysql.user where user='$user'"`
+	if [ "$s" = "" ]; then
+		$lcmysql -uroot -p$lcmysqlpw -e "CREATE USER '$user'@'localhost' IDENTIFIED BY '$pswd'"
+		# seems ok without below
+		# $lcmysql -uroot -p$lcmysqlpw -e "GRANT USAGE ON *.* TO '$joomlamainuser'@'localhost' IDENTIFIED BY '$joomlamainpswd' WITH MAX_QUERIES_PER_HOUR 0 MAX_CONNECTIONS_PER_HOUR 0 MAX_UPDATES_PER_HOUR 0 MAX_USER_CONNECTIONS 0"
+		$lcmysql -uroot -p$lcmysqlpw -e "FLUSH PRIVILEGES"
+		ml_echo "user $user is created"
+	else
+		ml_echo "user $user is existing"
+	fi
+}
+set_user_db() {
+	local user=$1
+	local dbname=$2
+	$lcmysql -uroot -p$lcmysqlpw -e "GRANT ALL PRIVILEGES ON $dbname.* TO '$user'@'localhost' WITH GRANT OPTION"
+	$lcmysql -uroot -p$lcmysqlpw -e "FLUSH PRIVILEGES"
+	ml_echo "$dbname for $user is granted"
+}
+tomcat_is_running() {
+	local s=`ps aux|grep tomcat`
+	tomcat_is_running=0
+	local oldIFS=$IFS
+	IFS=$'\n'
+	for row in $s; do
+		if [[ "$row" = *org.apache.catalina.startup.Bootstrap* ]]; then
+			tomcat_is_running=1
+			echo "yes"
+			return 0
+		fi
+	done
+	IFS=$oldIFS
+	echo "no"
+	return 1
+}
+tomcat_stop() {
+	ml_echo "stoping tomcat..."
+	if [ "$(tomcat_is_running)" = "no" ]; then
+		ml_echo "tomcat is not running"
+		return 0
+	fi
+	
+	local s=$($tomcat_dir/bin/shutdown.sh 2>&1 | grep "Connection refused")
+	if [ -n "$s" ]; then
+		ml_echo "$s"
+		s=$(ps aux | grep "tomcat")
+		local oldIFS=$IFS
+		IFS=$'\r\n'
+		for row in $s; do
+			if [[ "$row" = *org.apache.catalina.startup.Bootstrap* ]]; then
+				local s2="$(echo "$row" | grep -o "^\w\{1,\} \{1,\}\w\{1,\}")"
+				s2=${s2##* }
+				break
+			fi
+		done
+		IFS=$oldIFS
+		if [ -n "$s2" ]; then
+			kill $s2
+			ml_echo "tomcat pid: $s2 is killed"
+		fi
+	fi
+	
+	ml_echo "sleep 1 second..."
+	sleep 1s
+	while [ "$(tomcat_is_running)" = "yes" ]; do
+		ml_echo "tomcat is still running, sleep 10 more seconds..."
+		sleep 10s
+	done
+	ml_echo "tomcat is stopped"
+}
+tomcat_start() {
+	ml_echo "starting tomcat..." "function"
+	if [ "$(tomcat_is_running)" = "yes" ]; then
+		ml_echo "tomcat is running"
+		return 0
+	fi
+	local logfile=$tomcat_dir/logs/catalina.out
+	echo "" > $logfile
+	$tomcat_dir/bin/startup.sh
+	while [ -z "$(cat $logfile | grep "org.apache.catalina.startup.Catalina start")" ]; do
+		ml_echo "tomcat is starting...sleep 30s"
+		sleep 30s
+	done
+	ml_echo "tomcat is finally started"
+	sleep 3s
+}
+#check_deps gcc-c++
+#check_deps libssl-dev
+#check_deps libcurl-devel
+#check_deps libkrb5-dev
+#compare "a2.300" "a2.300b1"
+for arg in $*; do
+	if [ "${arg%=*}" = "-c" ]; then
+		. $bash_local
+		${arg#*=}
+	fi
+done
+

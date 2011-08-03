@@ -1,0 +1,167 @@
+#! /bin/bash
+# we use vsftpd-2.3.4.tar.gz because this is dependent for OS
+
+. ./lib
+
+do=$1
+
+vsftpd="$base_dir/common/vsftp"
+vsftpd_tar=$(latest_tar $vsftpd vsftpd-)
+vsftpd_v=${vsftpd_tar%.tar.*}
+vsftpd_dir="/usr/local/$vsftpd_v"
+vsftpd_bin="/usr/local/sbin/vsftpd"
+vsftpd_conf="/etc/vsftpd.conf"
+
+if [ "$do" = "reconf" ]; then
+	rm -f $vsftpd_bin
+	rm -rf $tmp_dir/$vsftpd_v
+fi
+
+if [ -f $vsftpd_bin ]; then
+	ml_echo "$vsftpd_bin is exisiting"
+else
+	cd $tmp_dir
+	if [ -d $tmp_dir/$vsftpd_v ]; then
+		ml_echo "$tmp_dir/$vsftpd_v is existing"
+	else
+		ml_echo "extracting $vsftpd_tar..."
+		tar xf $vsftpd/$vsftpd_tar
+	fi
+	
+	cd $vsftpd_v
+	make clean
+	
+	if [[ "$kernelv" = *Ubuntu* ]]; then
+		# deputil.o -Wl,-s `./vsf_findlibs.sh` 
+		# sysdeputil.o: In function `vsf_sysdep_check_auth':
+		# sysdeputil.c:(.text+0xf7): undefined reference to `crypt'
+		# sysdeputil.c:(.text+0x128): undefined reference to `crypt'
+		# collect2: ld returned 1 exit status
+		if [ ! -f /lib/libcrypt.so ]; then
+			ml_echo "creating link /lib/libcrypt.so"
+			ln -s /lib/libcrypto.so.0.9.8 /lib/libcrypt.so
+		else
+			ml_echo "/lib/libcrypt.so is existing"
+		fi
+	fi
+	ml_echo "make..."
+	check_deps gcc
+	check_deps pam-devel
+	
+	if [ "$machine" = "x86_64" ]; then
+		cp -f $dconf/vsf_findlibs.sh vsf_findlibs.sh
+	fi
+	
+	make >$dlogs.vsftp.make 2>&1
+	s=$(ls -l vsftpd | grep vsftpd)
+	if [ -z "$s" ]; then
+		ml_echo "make failed. exit"
+		exit 1
+	else
+		ml_echo "make success. $s"
+	fi
+	ml_echo "$(useradd nobody 2>&1)"
+	mkdir -p /usr/share/empty/
+	mkdir -p /var/ftp/
+	ml_echo "$(useradd -d /var/ftp ftp 2>&1)"
+	chown root.root /var/ftp
+	chmod og-w /var/ftp
+
+	ml_echo "make install..."
+	make install >$dlogs.vsftp.make_install 2>&1
+fi
+
+
+if [ -f $vsftpd_conf.mlbak ]; then
+	ml_echo "$vsftpd_conf.mlbak is existing"
+	if [ "$do" = "reconf" ]; then
+		cp -f $dconf/vsftpd.conf $vsftpd_conf
+		mkdir -p /etc/vsftpd_user_conf
+		cp -f $dconf/vsftpd_user_conf/* /etc/vsftpd_user_conf/
+	fi
+else
+	if [ -f $vsftpd_conf ]; then
+		mv $vsftpd_conf $vsftpd_conf.mlbak
+	fi
+	cp $dconf/vsftpd.conf $vsftpd_conf
+	ml_echo "$vsftpd_conf is updated"
+	mkdir -p /etc/vsftpd_user_conf
+	cp -f $dconf/vsftpd_user_conf/* /etc/vsftpd_user_conf/
+fi
+
+
+ml_echo "generating /etc/vsftpd_login.db..."
+# download from http://packages.ubuntu.com/
+rm -f /etc/vsftpd_login.db
+if [[ "$kernelv" = *Ubuntu* ]]; then
+	check_deps libdb3
+	check_deps libdb3-util
+	db3_load -T -t hash -f $dconf/logins.txt /etc/vsftpd_login.db
+else
+	check_deps db4
+	check_deps db4-utils
+	db_load -T -t hash -f $dconf/logins.txt /etc/vsftpd_login.db
+fi
+chmod 600 /etc/vsftpd_login.db
+
+
+if [ -f /lib64/security/pam_userdb.so ]; then
+	ml_echo "/lib64/security/pam_userdb.so is found"
+	echo "auth required /lib64/security/pam_userdb.so db=/etc/vsftpd_login"> /etc/pam.d/ftp
+	echo "account required /lib64/security/pam_userdb.so db=/etc/vsftpd_login" >> /etc/pam.d/ftp
+elif [ -f /lib/security/pam_userdb.so ]; then
+	ml_echo "/lib/security/pam_userdb.so is found"
+	echo "auth required /lib/security/pam_userdb.so db=/etc/vsftpd_login"> /etc/pam.d/ftp
+	echo "account required /lib/security/pam_userdb.so db=/etc/vsftpd_login" >> /etc/pam.d/ftp
+elif [ -f "/lib/i386-linux-gnu/security/pam_userdb.so" ]; then
+	ml_echo "/lib/i386-linux-gnu/security/pam_userdb.so is found"
+	echo "auth required /lib/i386-linux-gnu/security/pam_userdb.so db=/etc/vsftpd_login"> /etc/pam.d/ftp
+	echo "account required /lib/i386-linux-gnu/security/pam_userdb.so db=/etc/vsftpd_login" >> /etc/pam.d/ftp
+else
+	ml_echo "pam_userdb.so is not found. exit."
+	exit 1
+fi
+ml_echo "$(useradd -d /home/ftp virtual 2>&1)"
+
+
+s=$(ps aux|grep vsftpd)
+s=$(echo "$s" | grep "$vsftpd_bin")
+if [ -z "$s" ]; then
+	ml_echo "vsftpd is not running, now start..."
+	$vsftpd_bin &
+else
+	ml_echo "vsftpd is running"
+	oldIFS=$IFS
+	IFS=$'\r\n'
+	for row in $s; do
+		s2="$(echo "$row" | grep -o "^\w\{1,\} \{1,\}\w\{1,\}")"
+		ml_echo "$s2 is found"
+	done
+	IFS=$oldIFS
+	
+	if [ "$do" = "reconf" ]; then
+		while [ -n "$s" ]; do
+		#	echo "$s"
+		        oldIFS=$IFS
+		        IFS=$'\r\n'
+		        for row in $s; do
+				s2="$(echo "$row" | grep -o "^\w\{1,\} \{1,\}\w\{1,\}")"
+				pid=${s2##* }
+				ml_echo "kill -9 $pid"
+				kill -9 $pid
+                	  	sleep 1s
+				break	
+			done
+			IFS=$oldIFS
+			s=$(ps aux|grep vsftpd)
+			s=$(echo "$s" | grep "$vsftpd_bin")
+		done
+		ml_echo "vsftpd is killed, now restart..."
+		$vsftpd_bin &
+		s=$(ps aux|grep vsftpd)
+		s=$(echo "$s" | grep "$vsftpd_bin")
+		ml_echo "$(echo "$s" | grep -o "^\w\{1,\} \{1,\}\w\{1,\}")"
+	fi
+fi
+
+

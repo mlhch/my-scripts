@@ -1,0 +1,391 @@
+#! /bin/bash
+
+. ./lib
+#rm -rf /usr/local/pgsql
+#rm -rf $pg_datadir
+
+pg_type="tar"	# currently we focus on tar source
+pg_src="$base_dir/common/pgsql"
+pg_tar=$(latest_tar $pg_src postgresql-)
+pg_v="${pg_tar%.tar.*}"
+if [ -n "$__pgsql_dir" ]; then
+	pg_dir="$__pgsql_dir"
+else
+	pg_dir="/usr/local/$pg_v"
+fi
+
+pg_bin="$pg_dir/bin/psql"
+pg_tmp="$tmp_dir/postgresql-9.0.3"
+pg_datadir="/var/www/pgdata"
+
+flex_bz="flex-2.5.35.tar.bz2"
+flex_v="${flex_bz%.tar.*}"
+flex_dir="/usr/local/$flex_v"
+flex_tmp="$tmp_dir/$flex_v"
+pg_pw="postgreSpostgreS"
+pg_db="postgis"
+postgis_gz="postgis-1.5.2.tar.gz.gz"
+postgis_v="${postgis_gz%.tar.*}"
+postgis_tmp="$tmp_dir/$postgis_v"
+geos_bz="geos-3.2.2.tar.bz2"
+geos_v="${geos_bz%.tar.*}"
+geos_tmp="$tmp_dir/$geos_v"
+geos_dir="/usr/local/$geos_v"
+proj_gz="proj-4.7.0.tar.gz.gz"
+proj_v="${proj_gz%.tar.*}"
+proj_tmp="$tmp_dir/$proj_v"
+proj_dir="/usr/local/$proj_v"
+
+check_flex() {
+	local version=$1
+	# remove too old flex
+	if [[ "$kernelv" = *Ubuntu* ]]; then
+		# need to be updated, when system not install will get error
+		ml_echo "*Ubuntu: dpkg -s flex"
+		local s=$(dpkg -s flex 2>&1 | grep "Version: ")
+		if [ -n "$s" ]; then
+			s=${s/Version: /}
+			if [ "$s" \< "$version" ]; then
+				ml_echo "installed flex version $s < $version, will be removed"
+				dpkg -r flex
+			else
+				ml_echo "installed flex version $s >= $version, ok"
+				return 0
+			fi
+		fi
+		check_deps flex
+		return 0
+	else
+		s=$(rpm -q flex | grep "not installed")
+		if [ -z "$s" ]; then
+			ml_echo "removing flex: $s"
+			rpm -e flex
+		fi
+	fi
+	# compile flex
+	if  [ -d "$flex_dir" ];then
+		ml_echo "$flex_dir is existing"
+	else
+		cd $tmp_dir
+		check_exists $pg_src/$flex_bz
+		tar xf $pg_src/$flex_bz
+		cd $flex_tmp
+		cmd="./configure --prefix=$flex_dir"
+		ml_echo "$cmd"
+		$cmd > $dlogs.flex.configure 2>&1
+		ml_echo "make flex"
+		make > $dlogs.flex.make
+		ml_echo "make install flex"
+		make install > $dlogs.flex.make_install
+	fi
+	# add PATH
+	s=$(cat $bash_local|grep flex)
+	if [ -z "$s" ];then
+		echo "export PATH=\$PATH:$flex_dir/bin">>$bash_local
+	fi
+	. $bash_local
+}
+
+if [ -d "$pg_dir" ];then
+	ml_echo "$pg_dir is existing"
+else
+	if [ "$pg_type" = "tar" ];then
+		ml_echo "start installing $pg_v..."
+		cd $tmp_dir
+		if [ ! -d "$pg_tmp" ];then
+			ml_echo "extracting $pg_tar..."
+			check_exists $pg_src/$pg_tar
+			tar -xf $pg_src/$pg_tar
+		fi
+		
+		# ERROR 1: checking for flex... configure: WARNING:
+		# 	*** The installed version of Flex, /usr/bin/flex, is too old to use with PostgreSQL.
+		# 	*** Flex version 2.5.31 or later is required, but this is /usr/bin/flex version 2.5.4.
+		check_flex 2.5.31
+		# ERROR 2: configure: error: readline library not found
+		# 	If you have readline already installed, see config.log for details on the
+		# 	failure.  It is possible the compiler isn't looking in the proper directory.
+		# For Ubuntu, readline-devel maps to libreadline6(need libncurses5-dev, libncurses5-dev)
+		check_deps readline-devel
+		# 	Use --without-readline to disable readline support.
+		# ERROR 3: configure: error: zlib library not found
+		check_rpm zlib-devel
+		
+		cd $pg_tmp
+		cmd="./configure --prefix=$pg_dir"
+		ml_echo "$cmd"
+		$cmd > $dlogs.pgsql.config 2>&1
+		ml_echo "make $pg_v"
+		make > $dlogs.pgsql.make 2>&1
+		ml_echo "make install $pg_v"
+		make install > $dlogs.pgsql.make_install 2>&1
+	else
+		ml_echo "start installing $pg"
+		chmod +x $cd/$pg
+		# postgresql start need /tmp writable
+		chmod 0777 /tmp
+		$cd/$pg --mode unattended --prefix $pg_dir --superpassword $pg_pw
+	fi
+fi
+
+
+###############################################################################
+# postgis
+###############################################################################
+########## geos ##########
+if [ -d "$geos_dir" ];then
+	ml_echo "$geos_dir is existing"
+else
+	if [ -d "$geos_tmp" ];then
+		ml_echo "$geos_tmp is existing"
+	else
+		cd $tmp_dir
+		ml_echo "extracting $geos_bz"
+		check_exists $pg_src/$geos_bz
+		tar xf $pg_src/$geos_bz
+	fi
+	
+	# libtool: line 990: g++: command not found
+	# need gcc-c++-4.1.2-48.el5.x86_64.rpm, libstdc++-devel-4.1.2-48.el5.x86_64.rpm
+	check_deps "gcc-c++"
+	
+	cd $geos_tmp
+	ml_echo "./configure --prefix=$geos_dir"
+	./configure --prefix=$geos_dir > $dlogs.geos.configure
+	ml_echo "make $geos_v..."
+	make > $dlogs.geos.make 2>&1
+	ml_echo "make install $geos_v..."
+	make install >$dlogs.geos.make_install 2>&1
+	ml_echo "geos installation finished"
+fi
+s=$(cat $bash_local | grep "$geos_dir/lib")
+if [ -z "$s" ]; then
+	echo "export LD_LIBRARY_PATH=\$LD_LIBRARY_PATH:$geos_dir/lib" >> $bash_local
+	ml_echo "LD_LIBRARY_PATH $geos_dir/lib is added"
+else
+	ml_echo "LD_LIBRARY_PATH ${s#*:} is existing"
+fi
+. $bash_local
+
+########## proj ##########
+if [ -d "$proj_dir" ];then
+	ml_echo "$proj_dir is existing"
+else
+	if [ -d "$proj_tmp" ];then
+		ml_echo "$proj_tmp is existing"
+	else
+		cd $tmp_dir
+		ml_echo "extracting $proj_gz"
+		check_exists $pg_src/$proj_gz
+		tar xf $pg_src/$proj_gz
+	fi
+	cd $proj_tmp
+	ml_echo "./configure --prefix=$proj_dir"
+	./configure --prefix=$proj_dir > $dlogs.proj.configure 2>&1
+	ml_echo "make $proj_v"
+	make > $dlogs.proj.make 2>&1
+	ml_echo "make install $proj_v"
+	make install > $dlogs.proj.make_install 2>&1
+	ml_echo "proj installation finished"
+fi
+s=$(cat $bash_local | grep "$proj_dir/lib")
+if [ -z "$s" ]; then
+	echo "export LD_LIBRARY_PATH=\$LD_LIBRARY_PATH:$proj_dir/lib" >> $bash_local
+	ml_echo "LD_LIBRARY_PATH $proj_dir/lib is added"
+else
+	ml_echo "LD_LIBRARY_PATH ${s#*:} is existing"
+fi
+. $bash_local
+
+########## postgis ##########
+# configure: error: could not find pg_config within the current path.
+#   You may need to try re-running configure with a --with-pgconfig parameter.
+# configure: error: could not find geos-config within the current path.
+#   You may need to try re-running configure with a --with-geosconfig parameter.
+# configure: error: could not find proj_api.h
+#   you may need to specify the directory of a PROJ.4 installation using --with-projdir
+if [ -f "$pg_dir/bin/shp2pgsql" ];then
+	ml_echo "$postgis_gz is installed"
+else
+	# check and install libxml2
+	check_deps libxml2-devel
+	
+	if [ -d "$postgis_tmp" ]; then
+		ml_echo "$postgis_tmp is existing"
+	else
+		cd $tmp_dir
+		ml_echo "extracting $postgis_gz"
+		check_exists $pg_src/$postgis_gz
+		tar xf $pg_src/$postgis_gz
+	fi
+	
+	cd $postgis_tmp
+	ml_echo "./configure --with-pgconfig=$pg_dir/bin/pg_config --with-geosconfig=$geos_dir/bin/geos-config --with-projdir=$proj_dir"
+	./configure --with-pgconfig=$pg_dir/bin/pg_config --with-geosconfig=$geos_dir/bin/geos-config --with-projdir=$proj_dir > $dlogs.postgis.configure 2>&1
+	ml_echo "make $postgis_v"
+	make > $dlogs.postgis.make 2>&1
+	ml_echo "make install $postgis_v"
+	make install > $dlogs.postgis.make_install 2>&1
+	ml_echo "install finished $postgis_v"
+	
+	# LD_LIBRARY_PATH can not solve the problem
+	cp $geos_dir/lib/libgeos_c.so.1 $pg_dir/lib/
+	cp $proj_dir/lib/libproj.so.0 $pg_dir/lib/
+fi
+
+########## is postgresql running?##########
+pgsql_is_running() {
+	local s=$(ps aux|grep $pg_datadir)
+	local oldIFS=$IFS
+	IFS=$'\r\n'
+	for row in $s; do
+		if [[ "$row" = *-D* ]]; then
+			echo "yes"
+			return 0
+		fi
+	done
+	IFS=$oldIFS
+	echo "no"
+}
+pgsql_start() {
+	ml_echo "making /tmp writable by other users"
+	chmod o+w /tmp/
+	ml_echo "creating pg_dir/logfile and make it writable"
+	if [ ! -f $pg_dir/logfile ]; then
+		touch $pg_dir/logfile
+	fi
+	chown postgres $pg_dir/logfile
+	chmod g+w $pg_dir/logfile
+	
+	cd $pg_dir
+	# /etc/hosts need below entry, or will fail to start
+	# 127.0.0.1               localhost.localdomain localhost
+	if [ ! -f "/etc/hosts" ]; then
+		touch /etc/hosts
+	fi
+	local s="`cat /etc/hosts | grep localhost`"
+	if [ -z "$s" ]; then
+		echo "127.0.0.1               localhost.localdomain localhost">>/etc/hosts
+	fi
+	ml_echo "$(su postgres -c "$pg_dir/bin/pg_ctl -D $pg_datadir -l logfile start")"
+	# wait for pgsql really start
+	ml_echo "sleep 1 second to wait postgres really started..."
+	export PGPASSWORD=$pg_pw
+	sleep 1s
+	s="$($pg_bin -U postgres -c \\l 2>&1)"
+	# ml_echo "pg_bin:$s"
+	s=`echo "$s" | grep "could not connect to server"`
+	while [ -n "$s" ]; do
+		ml_echo "sleep 1 more second to wait postgres really started..."
+		sleep 1s
+		s="$($pg_bin -U postgres -c \\l 2>&1)"
+		#ml_echo "pg_bin:$s"
+		s=`echo "$s" | grep "could not connect to server"`
+	done
+	ml_echo "ok, postgres has been really started"
+}
+pgsql_stop() {
+	if [ "$(pgsql_is_running)" = "no" ]; then
+		ml_echo "pgsql is not running"
+		return 0
+	fi
+	cd $pg_dir
+	ml_echo "$(su postgres -c "$pg_dir/bin/pg_ctl -D $pg_datadir stop")"
+}
+
+
+########## is postgresql data_dir existing?##########
+if [ "$update_pgsql_datadir" = "1" ]; then
+	ml_echo "## update PostgreSQL data directory"
+	pgsql_stop
+	rm -rf $pg_datadir
+fi
+
+if [ -d "$pg_datadir" ]; then
+	ml_echo "$pg_datadir is existing"
+else
+	ml_echo "add user postgres:$(useradd postgres)"
+	mkdir -p $pg_datadir
+	chown postgres $pg_datadir
+	cd "$pg_dir"
+	ml_echo "inidb $pg_datadir..."
+	mkdir -p $pg_datadir
+	su postgres -c "$pg_dir/bin/initdb -D $pg_datadir" > $dlogs.pgsql.initdb 2>$dlogs.pgsql.initdb
+	pgsql_start
+	ml_echo "set password for postgres"
+	ml_echo "$($pg_bin -U postgres -c "ALTER ROLE postgres WITH ENCRYPTED PASSWORD '$pg_pw'")"
+	ml_echo "disable empty password login"
+	cp -f $dconf/pg_hba.conf $pg_datadir/pg_hba.conf
+	ml_echo "restart postgresql to enable new pg_hba.conf"
+	pgsql_stop
+	pgsql_start
+fi
+
+
+########## start or stop##########
+s=$(cat /etc/rc.local | grep "pg_ctl.*$pg_datadir")
+if [ -z "$s" ]; then
+	echo "su postgres -c \"$pg_dir/bin/pg_ctl -D $pg_datadir -l $pg_dir/logfile start\"" >> /etc/rc.local
+	ml_echo "pgsql service is added"
+else
+	ml_echo "pgsql service is existing in /etc/rc.local"
+fi
+if [ "$(pgsql_is_running)" = "yes" ]; then
+	ml_echo "pgsql is running"
+else
+	ml_echo "pgsql is not running"
+	pgsql_start
+fi
+
+
+###############################################################################
+# postgresql data
+###############################################################################
+export PGPASSWORD=$pg_pw
+########## template_postgis ##########
+dbname=template_$pg_db
+s=$($pg_bin -U postgres -c \\l | grep " $dbname ")
+if [ -z "$s" ]; then
+	$pg_dir/bin/createdb -U postgres -E UTF8 $dbname -T template0
+	#$pg_dir/bin/createlang -U postgres plpgsql $dbname
+	$pg_dir/bin/psql -U postgres -d $dbname -f $pg_dir/share/contrib/postgis-1.5/postgis.sql > /dev/null
+	$pg_dir/bin/psql -U postgres -d $dbname -f $pg_dir/share/contrib/postgis-1.5/spatial_ref_sys.sql > /dev/null
+	ml_echo "database $dbname is created"
+else
+	ml_echo "database $dbname is existing"
+fi
+
+########## postgis ##########
+dbname=$pg_db
+s=$($pg_bin -U postgres -c \\l | grep " $dbname ")
+if [ -z "$s" ];then
+	$pg_dir/bin/createdb -U postgres -E UTF8 -T template_$dbname $dbname
+	ml_echo "database $dbname is created"
+else
+	ml_echo "database $dbname is existing"
+fi
+
+
+########## phpPgAdmin ##########
+mkdir -p $droot
+cd $droot
+if [ -d "$droot/phpPgAdmin" ]; then
+	ml_echo "phpPgAdmin is installed"
+else
+	pga="$(ls $base_dir/tools | grep phpPgAdmin)"
+	check_exists $base_dir/tools/$pga
+	ml_echo "extracting $pga..."
+	unzip $base_dir/tools/$pga > /dev/null
+	mv ${pga%.zip} phpPgAdmin
+	ml_echo "set extra_login_security to false"
+	cp -f $dconf/phpPgAdmin.config.inc.php $droot/phpPgAdmin/conf/config.inc.php
+fi
+
+########## export PG_PASSWORD ##########
+s=$(cat $bash_local|grep PGPASSWORD)
+if [ -z "$s" ]; then
+	echo "export PGPASSWORD=$pg_pw">>$bash_local
+	ml_echo "PGPASSWORD is exported"
+else
+	ml_echo "PGPASSWORD is existing"
+fi

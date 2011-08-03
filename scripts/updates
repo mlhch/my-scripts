@@ -1,0 +1,73 @@
+#! /bin/bash
+
+file=
+remote=
+action=1
+for arg in $*; do
+	if [ "$arg" = "-E" ]; then
+		action=0
+		continue
+	fi
+	if [ "${arg%=*}" = "remote" ]; then
+		remote=${arg#*=}
+		continue
+	fi
+	if [ "${arg%=*}" = "file" ]; then
+		file=${arg#*=}
+		continue
+	fi
+done
+
+if [ -z "$file" ]; then
+	file=$1
+fi
+if [ -z "$remote" ]; then
+	remote=$2
+fi
+
+if [ -z "$remote" ]; then
+	echo "remote={ip} parameter is needed"
+	exit 1
+fi
+
+if [ -z "$file" ]; then
+	echo "No file to be updated"
+	exit 1
+fi
+
+rhost=$remote
+update() {
+	local name=$1
+	local action=$2
+	
+	local pwd=`pwd`
+	
+	if [[ "$name" = /* ]]; then
+		if [ ! -f "$name" ]; then
+			echo "$name is not a file"
+			return 1
+		fi
+		scp $name root@$rhost:$name
+		ssh root@$rhost chmod +x $name
+		action=0
+	else
+		if [ ! -f "$pwd/$name" ]; then
+			echo "$pwd/$name is not a file"
+			return 1
+		fi
+		scp $pwd/$name root@$rhost:$pwd/$name
+		ssh root@$rhost chmod +x $pwd/$name
+	fi
+	if [ $action = 1 ]; then
+		if [ "$name" != "updates" ]; then
+			# 注意，下面一行的引号很必要，不然 ＆＆ 会被认为是 ssh 命令的 &&
+			ssh root@$rhost "cd $pwd/ && . ./$name"
+		fi
+	fi
+}
+
+if [ -f "$file" ]; then
+	update $file $action
+else
+	echo "$file does not exist."
+fi
