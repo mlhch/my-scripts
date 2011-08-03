@@ -1,1 +1,0 @@
-su postgres -c "/usr/local/postgresql-9.0.3/bin/pg_ctl -D /var/www/pgdata stop"

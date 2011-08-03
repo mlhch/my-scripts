@@ -1,5 +1,0 @@
-For local:
-./install_awp --rpm-source=local --test-only --joomla-basic --no-realtime
-
-For example:
-./install_awp --rpm-source=local --mysql-dir=/usr/local/mysql/ --pgsql-dir=/usr/local/pgsql/ --mysql-pw=awp
