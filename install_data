@@ -1,0 +1,130 @@
+#! /bin/bash
+
+. ./lib
+
+## check psql connection
+export PGPASSWORD=$pg_pw
+s="$($pg_bin -U postgres -c \\l 2>&1 | grep "password authentication failed")"
+if [ -n "$s" ]; then
+	ml_echo "$s"
+	ml_echo "exit."
+	exit 1
+fi
+
+## postgresql tables
+## ssh $ruser@$rhost "$rpsql -U postgres -d postgis -c \\d | find \"table\""
+ml_echo "## PostgreSQL tables"
+get_pg_table helen_edit_associate		/var/www/pgtables
+get_pg_table helen_edit_dissolve			/var/www/pgtables
+get_pg_table helen_edit_dissolve_point	/var/www/pgtables
+get_pg_table effect2							/var/www/pgtables
+if [ -z "$test_only" ]; then
+get_pg_table gross2							/var/www/pgtables
+get_pg_table sub_4c2							/var/www/pgtables
+get_pg_table sub_ec2							/var/www/pgtables
+get_pg_table maj_sys2						/var/www/pgtables
+get_pg_table non2								/var/www/pgtables
+get_pg_table network2						/var/www/pgtables
+get_pg_table area_nts						/var/www/pgtables
+get_pg_table area_fmu						/var/www/pgtables
+get_pg_table area_basin						/var/www/pgtables
+get_pg_table area_subasin					/var/www/pgtables
+get_pg_table area_municipal					/var/www/pgtables
+get_pg_table bf_land_use_framework_projec			/var/www/pgtables
+fi
+get_pg_table bow_sub_watersheds_3401	/var/www/pgtables
+get_pg_table seawa_sub_prj					/var/www/pgtables
+
+get_pg_table station2						/var/www/pgtables
+get_pg_table station_join2					/var/www/pgtables
+
+tomcat_need_start=0
+###############################################################################
+# data_dir
+###############################################################################
+if [ "$update_geoserver_datadir" = "1" ]; then
+	ml_echo "## update GeoServer data_dir"
+	tomcat_stop
+	rm -rf $dbase/data_dir
+fi
+
+## GeoServer data_dir
+ml_echo "## GeoServer data_dir"
+if [ ! -d $dbase/data_dir ]; then
+	ml_echo "\$dbase/data_dir does not exist, start installing"
+	rget data_dir $dbase
+	tomcat_need_start=1
+else
+	ml_echo "\$dbase/data_dir is existing"
+fi
+
+## gwc_blobstore
+if [ -d $dbase/gwc_blobstore ]; then
+	ml_echo "\$dbase/gwc_blobstore is existing"
+else
+	rget gwc_blobstore $dbase
+fi
+
+## GEOSERVER_DATA_DIR
+s=$(cat $bash_local | grep "GEOSERVER_DATA_DIR")
+if [ -z "$s" ];then
+	echo "export GEOSERVER_DATA_DIR=$geo_datadir" >> $bash_local
+	ml_echo "GEOSERVER_DATA_DIR is added as $geo_datadir $bash_local. restart tomcat..."
+	. $bash_local
+	tomcat_need_start=1
+else
+	ml_echo "GEOSERVER_DATA_DIR=$geo_datadir is existing in $bash_local"
+fi
+
+
+###############################################################################
+# geowebcache configuration
+###############################################################################
+if [ -d "$d" ]; then
+	mkdir -p "/var/www/gwc_blobstore"
+	if [ ! -f "$d/geowebcache-core-context.xml.bak" ]; then
+		ml_echo "stop tomcat for geowebcache-core-context.xml"
+		tomcat_stop
+		mv "$d/geowebcache-core-context.xml" "$d/geowebcache-core-context.xml.bak"
+		cp "$dconf/geowebcache-core-context.xml" "$d/geowebcache-core-context.xml"
+		ml_echo "geowebcache-core-context.xml is backuped and replaced"
+		ml_echo "start tomcat..."
+		tomcat_start
+	else
+		ml_echo "geowebcache-core-context.xml.bak is existing"
+	fi
+else
+	ml_echo "geowebcache is not ready at last"
+fi
+
+
+
+ml_echo "## geowebcache.xml for layers in data_dir"
+. $bash_local
+d="$tomcat_dir/webapps/geowebcache/WEB-INF/classes"
+if [ -d "$d" ]; then
+	if [ -f "$d/geowebcache.xml.bak" ]; then
+		ml_echo "classes/geowebcache.xml.bak is existing. no need to backup"
+	else
+		tomcat_stop
+		mv "$d/geowebcache.xml" "$d/geowebcache.xml.bak"
+		ml_echo "classes/geowebcache.xml is backuped"
+		tomcat_need_start=1
+	fi
+	if [ ! -f "$d/geowebcache.xml" ]; then
+		ml_echo "stop tomcat for copying geowebcache.xml"
+		tomcat_stop
+		cp "$dconf/geowebcache.xml" "$d/geowebcache.xml"
+		ml_echo "classes/geowebcache is replaced"
+		ml_echo "start tomcat..."
+		tomcat_need_start=1
+	else
+		ml_echo "classes/geowebcache.xml is existing. no need to update"
+	fi
+else
+	ml_echo "geowebcache is not ready"
+fi
+
+if [ $tomcat_need_start = 1 ]; then
+	tomcat_start
+fi

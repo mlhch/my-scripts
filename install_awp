@@ -1,0 +1,182 @@
+#! /bin/bash
+# 2011-05-31 Ubuntu OK
+
+with_data=1
+middle_user=root
+middle_host=
+for arg in $*; do
+	if [ "$arg" = "--no-data" ]; then
+		with_data=0
+		continue
+	fi
+	if [ "$arg" = "--no-joomla" ]; then
+		no_joomla=1
+		continue
+	fi
+	if [ "$arg" = "--no-realtime" ]; then
+		no_realtime=1
+		continue
+	fi
+	if [ "$arg" = "--joomla-basic" ]; then
+		__joomla_basic=1
+		continue
+	fi
+	if [ "$arg" = "--enable-pgsql" ]; then
+		__enable_pgsql=1
+		continue
+	fi
+	if [ "${arg%=*}" = "--middle-host" ]; then
+		middle_host=${arg#*=}
+		__middle_host=${arg#*=}
+		continue
+	fi
+	if [ "${arg%=*}" = "--middle-user" ]; then
+		middle_user=${arg#*=}
+		__middle_user=${arg#*=}
+		continue
+	fi
+	if [ "${arg%=*}" = "--rpm-source" ]; then
+		rpm_source=${arg#*=}
+		continue
+	fi
+	if [ "${arg%=*}" = "--update-joomlamain" ]; then
+		update_joomlamain=1
+		continue
+	fi
+	if [ "${arg%=*}" = "--update-joomlabrbc" ]; then
+		update_joomlabrbc=1
+		continue
+	fi
+	if [ "${arg%=*}" = "--update-joomlaseawa" ]; then
+		update_joomlaseawa=1
+		continue
+	fi
+	if [ "${arg%=*}" = "--update-pgsql-datadir" ]; then
+		update_pgsql_datadir=1
+		continue
+	fi
+	if [ "${arg%=*}" = "--update-geoserver-datadir" ]; then
+		update_geoserver_datadir=1
+		continue
+	fi
+	if [ "${arg%=*}" = "--mysql-dir" ]; then
+		__mysql_dir=${arg#*=}
+		continue
+	fi
+	if [ "${arg%=*}" = "--pgsql-dir" ]; then
+		__pgsql_dir=${arg#*=}
+		continue
+	fi
+	if [ "${arg%=*}" = "--mysql-pw" ]; then
+		__mysql_pw=${arg#*=}
+		continue
+	fi
+	if [ "${arg%=*}" = "--update-geoserver-datadir" ]; then
+		update_geoserver_datadir=1
+		continue
+	fi
+	if [ "${arg%=*}" = "--test-only" ]; then
+		test_only=1
+		continue
+	fi
+done
+
+echo "Usage:"
+echo "  --no-data"
+echo "      This parameter allows the setup script create only the software environment,"
+echo "      including apache httpd, mysql, postgresql, php, geoserver, geowebcache."
+echo "  --middle-host={ip}"
+echo "      This parameter allows the setup script to check and transfer data from a"
+echo "      middle host other than the running product server directly."
+echo "  --middle-user={username like root or Administrator or else, default is root}"
+echo "      This parameter allows you to specify the actual username of middle host."
+echo "  --update-joomlamain"
+echo "  --update-joomlabrbc"
+echo "  --update-joomlaseawa"
+echo "      This 3 parameters allow to get the latest database on 64.46.36.18"
+echo ""
+
+ruser2=$middle_user
+rhost2=$middle_host
+
+. ./lib
+
+if [ -n "$(cat /etc/rc.local | grep "$bash_local")" ]; then
+	ml_echo "$bash_local is existing in /etc/rc.local"
+else
+	echo ". $bash_local" >> /etc/rc.local
+	ml_echo "$bash_local is added to /etc/rc.local"
+fi
+if [ -n "$(cat /etc/rc.local | grep "^exit 0")" ]; then
+	echo "$(cat /etc/rc.local | grep -v "^exit 0")" > /etc/rc.local
+fi
+
+## check and install gcc, pkgconfig(libxml2-devel), gcc-c++(geos)
+ml_echo "checking gcc, pkgconfig, gcc-c++..."
+if [ "$rpm_source" = "local" ]; then
+	check_rpm gcc
+else
+	yum install -y gcc pkgconfig gcc-c++ > /dev/null
+fi
+
+## check and install apache
+ml_echo "########################################"
+ml_echo "# start installing Httpd"
+ml_echo "########################################"
+cd $base_dir/scripts
+. ./install_apache
+
+## check and install mysql
+ml_echo "########################################"
+ml_echo "# start installing MySQL"
+ml_echo "########################################"
+cd $base_dir/scripts
+. ./install_mysql
+
+## check and install pgsql
+ml_echo "########################################"
+ml_echo "# start installing PostgreSQL"
+ml_echo "########################################"
+cd $base_dir/scripts
+. ./install_pgsql
+
+## check and install php
+ml_echo "########################################"
+ml_echo "# start installing PHP"
+ml_echo "########################################"
+cd $base_dir/scripts
+. ./install_php
+
+## check and install geoserver
+ml_echo "########################################"
+ml_echo "# start installing GeoServer"
+ml_echo "########################################"
+cd $base_dir/scripts
+. ./install_geoserver
+
+if [ $with_data = 1 ]; then
+	## migrate postgresql data
+	ml_echo "########################################"
+	ml_echo "# start migrating postgresql data"
+	ml_echo "########################################"
+	cd $base_dir/scripts
+	. ./install_data
+
+	## migrate awp joomla
+	if [ "$no_joomla" = "" ]; then
+	ml_echo "########################################"
+	ml_echo "# start migrating Joomla site data"
+	ml_echo "########################################"
+	cd $base_dir/scripts
+	. ./install_joomla
+	fi
+	
+	## migrate awp realtime
+	if [ -z "$no_realtime" ]; then
+	ml_echo "########################################"
+	ml_echo "# start migrating realtime data"
+	ml_echo "########################################"
+	cd $base_dir/scripts
+	. ./install_realtime
+	fi
+fi

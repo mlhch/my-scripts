@@ -1,0 +1,135 @@
+#! /bin/bash
+
+. ./lib
+
+# php
+php_src="$base_dir/common/php"
+php_tar=$(latest_tar $php_src php-)
+php_v="${php_tar%.tar.*}"
+php_dir="/usr/local/$php_v"
+conf_file="$dconf/httpd.conf"
+libxml2_dir="$base_dir/php/libxml2-2.7.8"
+libxml2_file="$base_dir/php/libxml2-sources-2.7.8.tar.gz.gz"
+apache_dir="/usr/local/apache-2.2.17"
+if [ "$1" = "-f" ];then
+	ml_echo "removing $php_dir..."
+	rm -rf $php_dir
+fi
+
+install_php() {
+	if [ -d $tmp_dir/$php_v ];then
+		ml_echo "directory $tmp_dir/$php_v is existing"
+	else
+		ml_echo "extracting $php_tar..."
+		cd $tmp_dir
+		check_exists $php_src/$php_tar
+		tar xf $php_src/$php_tar
+	fi
+	
+	# check and install libxml2
+	#check_deps "zlib-devel"
+	check_deps "libxml2-devel"
+	if [[ "$kernelv" = *Ubuntu* ]]; then
+		check_deps "libcurl"
+		## checking for cURL in default path... not found
+		## configure: error: Please reinstall the libcurl distribution -
+	    ## easy.h should be in <curl-dir>/include/curl/
+		check_deps "libcurl-devel"
+	else
+		check_deps "curl-devel"
+	fi
+	
+	cd $tmp_dir/$php_v
+	s="./configure --prefix=$php_dir --with-apxs2=$http_dir/bin/apxs --with-mysql=$mysql_dir --with-curl --with-zlib"
+	if [ "$__enable_pgsql" = "1" ]; then
+		s="$s --with-pgsql=$pg_dir"
+	fi
+	ml_echo "$s"
+	$s > $dlogs.php.configure 2>&1
+	ml_echo "make $php_v"
+	make > $dlogs.php.make 2>&1
+	ml_echo "make install $php_v"
+	make install > $dlogs.php.make_install 2>&1
+	ml_echo "php installed $php_v"
+}
+
+
+if [ -d $php_dir ];then
+	ml_echo "php is existing"
+else
+	ml_echo "start installing php"
+	install_php
+fi
+
+
+# create info.php
+mkdir -p /var/www/html
+info="/var/www/html/info.php"
+if [ ! -f $info ];then
+	echo "<?php phpinfo()?>" > $info
+	ml_echo "$info is created"
+fi
+
+
+# httpd.conf
+# t=`date "+%F.%H:%M:%S"`
+f=$http_dir/conf/httpd.conf
+if [ -f "$f.mlbak" ];then
+	ml_echo "$f.mlbak is existing"
+else
+	mv $f "$f.mlbak"
+	cp $conf_file $f
+	ml_echo "$f is updated"
+	service httpd restart
+fi
+
+
+f=$php_dir/php.ini
+if [ -f $f ]; then
+	ml_echo "$f is existing"
+else
+	cp $tmp_dir/$php_v/php.ini-recommended $php_dir/php.ini
+	ml_echo "$php_dir/php.ini is created"
+	service httpd restart
+fi
+
+
+httpd_is_running() {
+	s=`ps aux|grep httpd`
+	
+	httpd_is_running=0
+	oldIFS=$IFS
+	IFS=$'\r\n'
+	for row in $s
+	do
+		if [[ "$row" = *httpd\ -k\ start* ]];then
+			httpd_is_running=1
+			break
+		fi
+	done
+	IFS=$oldIFS
+}
+httpd_is_running
+if [ $httpd_is_running = 1 ];then
+	ml_echo "httpd is running"
+	#ml_echo "stopping httpd..."
+	#service httpd stop
+	#ml_echo "starting httpd..."
+	service httpd restart
+else
+	ml_echo "starting httpd..."
+	service httpd start
+fi
+
+
+########## phpMyAdmin ##########
+if [ -d "$droot/phpMyAdmin" ]; then
+	ml_echo "phpMyAdmin is installed"
+else
+	cd $droot
+	pma="$(ls $base_dir/tools | grep phpMyAdmin)"
+	check_exists $base_dir/tools/$pma
+	ml_echo "extracting $pma..."
+	tar xf $base_dir/tools/$pma > /dev/null
+	mv ${pma%.tar.*} phpMyAdmin
+fi

@@ -1,0 +1,177 @@
+#! /bin/bash
+
+. ./lib
+
+## geoserver-*.bin takes too much time (50 minutes) to startup
+## so let's choose apache-tomcat and  geoserver-*.war
+
+## java
+unset JRE_HOME
+. /root/.bash_local
+if [ ! -d "$JRE_HOME" ];then
+	ml_echo "extracting $jre_bin..."
+	cd `dirname $jre_dir`
+	chmod +x $jdk_cd/$jre_bin
+	$jdk_cd/$jre_bin > /dev/null
+	echo "export JRE_HOME=$jre_dir">>$bash_local
+	. /root/.bash_local
+	ml_echo "JRE_HOME $JRE_HOME is installed"
+else
+	ml_echo "JRE_HOME $JRE_HOME is existing"
+fi
+
+## apache-tomcat
+if [ -d "$tomcat_dir" ]; then
+	ml_echo "$tomcat_dir is existing"
+else
+	ml_echo "extracting $tomcat_gz..."
+	tar -xf $tomcat_cd/$tomcat_gz -C `dirname $tomcat_dir`
+fi
+# start on boot
+s=$(cat /etc/rc.local | grep "$tomcat_dir")
+if [ -z "$s" ];then
+	echo "$tomcat_dir/bin/startup.sh" >> /etc/rc.local
+	ml_echo "service tomcat is installed in rc.local"
+else
+	ml_echo "service tomcat is existing in rc.local"
+fi
+
+
+## geoserver-*.war
+if [ -f "$tomcat_dir/webapps/geoserver.war" ]; then
+	ml_echo "geoserver.war is existing"
+else
+	ml_echo "extracting geoserver.war..."
+	unzip "$geo_cd/$geo_war_zip" geoserver.war -d "$tomcat_dir/webapps" > /dev/null
+fi
+
+
+## geowebcache-*.war
+if [ -f "$tomcat_dir/webapps/geowebcache.war" ]; then
+	ml_echo "geowebcache.war is existing"
+else
+	ml_echo "extracting geowebcache.war..."
+	unzip "$geo_cd/$gwc_war_zip" geowebcache.war -d "$tomcat_dir/webapps" > /dev/null
+fi
+
+
+if [ "$(tomcat_is_running)" = "yes" ]; then
+	ml_echo "tomcat is running"
+else
+	ml_echo "tomcat is not running, starting"
+	tomcat_start
+fi
+
+
+d="$tomcat_dir/webapps/geowebcache/WEB-INF"
+while [ ! -d "$d" ]; do
+	ml_echo "geowebcache is not ready, sleep 3 seconds..."
+	sleep 3s
+done
+ml_echo "geowebcache is ready, continue"
+
+
+
+if [ 0 = 1 ]; then
+
+if [ -d "$geo_dir" ]; then
+	ml_echo "$geo_v is installed"
+else
+	ml_echo "extracting $geo_v..."
+	cd `dirname $geo_dir`
+	unzip $geo_cd/$geo_bin > /dev/null
+fi
+
+
+###############################################################################
+# auto startup
+###############################################################################
+s=`cat /etc/rc.local|grep geoserver`
+if [ -z "$s" ]; then
+	echo "$geo_dir/bin/startup.sh">>/etc/rc.local
+	ml_echo "$geo_dir/bin/startup.sh is added to rc.local"
+else
+	ml_echo "$s is existing in /etc/rc.local"
+fi
+
+geoserver_is_running() {
+	geoserver_is_running="no"
+	s=`ps aux|grep geoserver`
+	#echo $s
+	oldIFS=$IFS
+		IFS=$'\r\n'
+		for row in $s
+		do
+			if [[ "$row" = *DGEOSERVER_DATA_DIR* ]];then
+				geoserver_is_running="yes"
+				break
+			fi
+		done
+	IFS=$oldIFS
+}
+geoserver_start() {
+	geoserver_is_running
+	if [ "$geoserver_is_running" = "yes" ];then
+		ml_echo "geoserver is running"
+	else
+		ml_echo "starting geoserver"
+		export JAVA_HOME
+		cd $geo_dir
+		sh bin/startup.sh &
+		#echo | $(sh ./startup.sh)
+		#while [ "$geoserver_is_running" = "no" ]; do
+		#	read -t 1
+		#	geoserver_is_running
+		#done
+	fi
+}
+geoserver_stop() {
+	geoserver_is_running
+	if [ "$geoserver_is_running" = "yes" ];then
+		ml_echo "stoping geoserver..."
+		export JAVA_HOME
+		cd $geo_dir
+		sh bin/shutdown.sh &
+		#echo | $(sh ./shutdown.sh)
+		#while [ "$geoserver_is_running" = "yes" ]; do
+		#	read -t 1
+		#	geoserver_is_running
+		#done
+	else
+		ml_echo "geoserver is not running"
+	fi
+}
+
+###############################################################################
+# geowebcache
+###############################################################################
+gwc_dir="$geo_dir/webapps/geowebcache"
+if [ -d "$gwc_dir/WEB-INF" ];then
+	ml_echo "$gwc_dir/WEB-INF is existing"
+else
+	if [ ! -f "$geo_cd/geowebcache.war" ]; then
+		cd $geo_cd
+		ml_echo "unzipping $gwcfile"
+		check_exists "$geo_cd/$gwcfile"
+		unzip "$geo_cd/$gwcfile" > /dev/null
+	fi
+	mkdir -p "$gwc_dir"
+	cd "$gwc_dir"
+	$JAVA_HOME/bin/jar -xf $geo_cd/geowebcache.war
+	rm -f $geo_cd/geowebcache.war
+	ml_echo "directory webapps/geowebcache is created"
+	
+	#cp -f "$dconf/geowebcache-servlet.xml" "$geo_dir/webapps/geowebcache/WEB-INF/geowebcache-core-context.xml"
+	#ml_echo "WEB-INF/geowebcache-core-context.xml is overrided"
+fi
+
+geoserver_is_running
+if [ "$geoserver_is_running" = "yes" ];then
+	geoserver_stop
+	geoserver_start
+else
+	geoserver_start
+fi
+
+
+fi

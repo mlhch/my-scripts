@@ -1,0 +1,24 @@
+#! /bin/bash
+
+. lib
+
+user=root
+host=www.albertawater.com
+
+cd $base_dir
+[ -f scripts.tar ] && ml_echo "removing scripts.tar" && rm -f scripts.tar
+[ -f conf.tar ] && ml_echo "removing conf.tar" && rm -f conf.tar
+
+ml_echo "tar scripts.tar and conf.tar..."
+tar cf scripts.tar scripts
+tar cf conf.tar conf
+
+ml_echo "scp scripts.tar $user@$host:$base_dir"
+scp scripts.tar $user@$host:$base_dir
+scp conf.tar $user@$host:$base_dir
+
+ml_echo "remote replace..."
+ssh $user@$host "cd $base_dir && rm -rf scripts && tar xf scripts.tar && rm -rf conf && tar xf conf.tar"
+
+ml_echo "start install..."
+ssh $user@$host "cd $base_dir/scripts/ && ./install_awp --rpm-source=local --mysql-dir=/usr/local/mysql/ --pgsql-dir=/usr/local/pgsql/ --mysql-pw=awp"

@@ -1,0 +1,123 @@
+#! /bin/bash
+
+. ./lib
+
+# mysql configuration
+# mysql compilation is too complex, so we choose binaries
+mysql="`pwd`/../linux_$machine/mysql"
+mysql_tar=$(latest_tar $mysql mysql-)
+mysql_v=${mysql_tar%-linux*}
+if [ -n "$__mysql_dir" ]; then
+	mysql_dir="$__mysql_dir"
+else
+	mysql_dir="/usr/local/${mysql_tar%.tar.*}"
+fi
+
+mysql_datadir="/var/www/mysql_datadir"
+mysql_dbs="/var/www/mysql_dbs"
+mysqlrp="SqL_m)rd)r"
+lcmysql="$mysql_dir/bin/mysql"
+if [ "$__mysql_pw" = "awp" ]; then
+	lcmysqlpw=#s2.k]_sqrDq
+elif [ -n "$__mysql_pw" ]; then
+	lcmysqlpw="$__mysql_pw"
+else
+	lcmysqlpw=mysql
+fi
+
+configure_mysql() {
+	ml_echo "configuring mysql..."
+	groupadd mysql
+	useradd -r -g mysql mysql
+	cd $mysql_dir
+	chown -R mysql .
+	chgrp -R mysql .
+	chmod -R 0777 /tmp
+	
+	./scripts/mysql_install_db --user=mysql	> /dev/null
+	chown -R root .
+	chown -R mysql data
+	cp ./support-files/my-medium.cnf /etc/my.cnf
+	cp ./support-files/mysql.server /etc/init.d/mysql
+	chmod +x /etc/init.d/mysql
+	# service method make it synchronous
+ 	#bin/mysqld_safe --user=mysql &
+	service mysql start
+	
+	# delete anonymous account, no matter what host is
+	./bin/mysql -e "DELETE FROM mysql.user WHERE User=''"
+	./bin/mysqladmin -u root password "$lcmysqlpw"
+	./bin/mysql -e "FLUSH PRIVILEGES"
+	ml_echo "password has been created"
+}
+
+mysql_is_running() {
+	s=`ps aux|grep mysql`
+	
+	local is_running=0
+	oldIFS=$IFS
+	IFS=$'\r\n'
+	for row in $s; do
+		if [[ "$row" = *--basedir=* ]];then
+			is_running=1
+			break
+		fi
+	done
+	IFS=$oldIFS
+	
+	echo $is_running
+}
+
+
+if [[ "$kernelv" = *Ubuntu* ]]; then
+	cd .
+else
+	# 卸载已安装的 rpm 包，可能 i386, x86_64 的都有
+	s=`rpm -q mysql|grep "not installed"`
+	if [ -z "$s" ];then
+		ml_echo "mysql rpm is existing, removing ..."
+		rpm -e --allmatches --nodeps mysql
+	fi
+fi
+
+
+# start install
+if [[ "$kernelv" = *Ubuntu* ]]; then
+	if [ -z "$(dpkg -l | grep "libaio1 ")" ]; then
+		check_deps libaio1
+		ml_echo "libaio1 is installed"
+	else
+		ml_echo "libaio1 is existing"
+	fi
+fi
+
+if [ -d $mysql_dir ]; then
+	ml_echo "$mysql_dir is existing";
+	if [ -f /etc/init.d/mysql ]; then
+		is_running=$(mysql_is_running)
+		if [ $is_running = 1 ]; then
+			ml_echo "mysql is running"
+		else
+			service mysql start
+		fi
+	else
+		configure_mysql
+	fi
+else
+	cd /usr/local
+	ml_echo "extracting $mysql_tar..."
+	check_exists $mysql/$mysql_tar
+	tar xf $mysql/$mysql_tar
+	ln -s $mysql_dir mysql
+	configure_mysql
+fi
+
+
+# ubuntu only has /etc/rc.local
+s=`cat /etc/rc.local | grep mysql`
+if [ -z "$s" ];then
+	echo "service mysql start" >> /etc/rc.local
+	ml_echo "mysql service is added in /etc/rc.local"
+else
+	ml_echo "mysql service is existing in /etc/rc.local"
+fi

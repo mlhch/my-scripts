@@ -1,0 +1,53 @@
+#! /bin/bash
+
+. ./lib
+
+git="$base_dir/common/git"
+git_tar=$(latest_tar $git git-)
+git_v=${git_tar%.tar.*}
+git_dir=/usr/local/$git_v
+
+if [ -d $git_dir ]; then
+	ml_echo "$git_dir is exsiting"
+else
+	check_deps zlib
+	cd $tmp_dir
+	ml_echo "extracting $git_tar..."
+	tar --overwrite -xf $git/$git_tar
+	cd $git_v
+	ml_echo "./configure --prefix=$git_dir"
+	./configure --prefix=$git_dir > $dlogs.git.configure 2>&1
+	ml_echo "make $git_tar..."
+	make > $dlogs.git.make 2>&1
+	ml_echo "make install $git_tar..."
+	make install > $dlogs.git.make_install 2>&1
+	ml_echo "$git_tar is installed"
+fi
+
+
+if [ ! -f $bash_local ]; then
+	touch $bash_local
+fi
+if [ -n "$(cat $bash_local | grep $git_dir)" ]; then
+	ml_echo "PATH $git_dir/bin is existing in $bash_local"
+else
+	echo "export PATH=$git_dir/bin:$PATH" > $bash_local
+	ml_echo "PATH $git_dir/bin is added in $bash_local"
+fi
+. $bash_local
+
+
+mkdir -p /var/git
+
+
+
+
+
+
+
+
+
+
+
+
+
