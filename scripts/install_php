@@ -6,7 +6,7 @@ for arg in $*; do
 	if [ "$arg" = "--with-http" ]; then
 		. ./install_apache
 	fi
-	if [ "$arg" = "--with-http" ]; then
+	if [ "$arg" = "--with-mysql" ]; then
 		. ./install_mysql
 	fi
 done
@@ -60,7 +60,6 @@ install_php() {
 	
 	cd $tmp_dir/$php_v
 	s="./configure --prefix=$php_dir --with-apxs2=$http_dir/bin/apxs --with-mysql=$mysql_dir --with-curl --with-zlib"
-	echo "$s";exit
 	if [ "$__enable_pgsql" = "1" ]; then
 		s="$s --with-pgsql=$pg_dir"
 	fi
@@ -100,18 +99,28 @@ if [ -f "$f.mlbak" ];then
 else
 	check_exists "$conf_file"
 	mv $f "$f.mlbak"
-	cp $conf_file $f
+	
+	s=$(cat $conf_file)
+	s=${s//httpd-2.2.17/$http_v}
+	echo "$s" > $f
+	
 	ml_echo "$f is updated"
 	service httpd restart
 fi
 
 
 f=$php_dir/php.ini
-check_exists "$f"
 if [ -f $f ]; then
 	ml_echo "$f is existing"
 else
-	cp $tmp_dir/$php_v/php.ini-recommended $php_dir/php.ini
+	if [ -f $tmp_dir/$php_v/php.ini-recommended ]; then
+		cp $tmp_dir/$php_v/php.ini-recommended $php_dir/php.ini
+	elif [ -f $tmp_dir/$php_v/php.ini-production ]; then
+		cp $tmp_dir/$php_v/php.ini-production $php_dir/php.ini
+	else
+		ml_echo "php.ini not found"
+		exit 1
+	fi
 	ml_echo "$php_dir/php.ini is created"
 	service httpd restart
 fi
@@ -150,6 +159,7 @@ if [ -d "$droot/phpMyAdmin" ]; then
 	ml_echo "phpMyAdmin is installed"
 else
 	cd $droot
+	mkdir -p $base_dir/tools
 	pma="$(ls $base_dir/tools | grep phpMyAdmin)"
 	check_exists $base_dir/tools/$pma
 	ml_echo "extracting $pma..."
