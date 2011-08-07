@@ -4,9 +4,9 @@
 
 http="../common/apache"
 http_tar=$(latest_tar $http httpd-)
+[ $? = 1 ] && ml_echo "$http_tar" && exit 1
 http_v="${http_tar%.tar.*}"
 http_dir="/usr/local/$http_v"
-
 
 #x###########################
 #x remove httpd's rpm

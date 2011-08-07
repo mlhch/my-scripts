@@ -2,9 +2,28 @@
 
 . ./lib
 
+for arg in $*; do
+	if [ "$arg" = "--with-http" ]; then
+		. ./install_apache
+	fi
+	if [ "$arg" = "--with-http" ]; then
+		. ./install_mysql
+	fi
+done
+
+if [ -z "$http_dir" ]; then
+	ml_echo "php need to know \$http_dir, use --with-http and try again"
+	exit 1
+fi
+if [ -z "$mysql_dir" ]; then
+	ml_echo "php need to know \$mysql_dir, use --with-mysql and try again"
+	exit 1
+fi
+
 # php
 php_src="$base_dir/common/php"
 php_tar=$(latest_tar $php_src php-)
+[ $? = 1 ] && ml_echo "$php_tar" && exit 1
 php_v="${php_tar%.tar.*}"
 php_dir="/usr/local/$php_v"
 conf_file="$dconf/httpd.conf"
@@ -41,6 +60,7 @@ install_php() {
 	
 	cd $tmp_dir/$php_v
 	s="./configure --prefix=$php_dir --with-apxs2=$http_dir/bin/apxs --with-mysql=$mysql_dir --with-curl --with-zlib"
+	echo "$s";exit
 	if [ "$__enable_pgsql" = "1" ]; then
 		s="$s --with-pgsql=$pg_dir"
 	fi
@@ -74,9 +94,11 @@ fi
 # httpd.conf
 # t=`date "+%F.%H:%M:%S"`
 f=$http_dir/conf/httpd.conf
+check_exists "$f"
 if [ -f "$f.mlbak" ];then
 	ml_echo "$f.mlbak is existing"
 else
+	check_exists "$conf_file"
 	mv $f "$f.mlbak"
 	cp $conf_file $f
 	ml_echo "$f is updated"
@@ -85,6 +107,7 @@ fi
 
 
 f=$php_dir/php.ini
+check_exists "$f"
 if [ -f $f ]; then
 	ml_echo "$f is existing"
 else

@@ -127,15 +127,20 @@ latest_tar() {
 	local path=$1
 	local prefix=$2
 	
-	s=$(ls -vr $path)
-	local oldIFS=$IFS
-	IFS=$'\r\n'
-	for row in $s; do
-		[[ "$row" = $prefix* ]] && echo $row && return 0
-	done
+	if [ ! -d $path ]; then
+		echo "directory $path does not exist"
+		return 1
+	else
+		s=$(ls -vr $path)
+		local oldIFS=$IFS
+		IFS=$'\r\n'
+		for row in $s; do
+			[[ "$row" = $prefix* ]] && echo $row && return 0
+		done
+	fi
 	
 	echo "latest source file $path/$prefix not found"
-	exit 1
+	return 1
 }
 
 cmd_exists() {
