@@ -6,6 +6,7 @@
 # mysql compilation is too complex, so we choose binaries
 mysql="`pwd`/../linux_$machine/mysql"
 mysql_tar=$(latest_tar $mysql mysql-)
+[ $? = 1 ] && ml_echo "$mysql_tar" && exit 1
 mysql_v=${mysql_tar%-linux*}
 if [ -n "$__mysql_dir" ]; then
 	mysql_dir="$__mysql_dir"
