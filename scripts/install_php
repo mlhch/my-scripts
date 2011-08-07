@@ -4,10 +4,10 @@
 
 for arg in $*; do
 	if [ "$arg" = "--with-http" ]; then
-		. ./install_apache
+		. $base_dir/scripts/install_apache
 	fi
 	if [ "$arg" = "--with-mysql" ]; then
-		. ./install_mysql
+		. $base_dir/scripts/install_mysql
 	fi
 done
 
