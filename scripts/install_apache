@@ -84,6 +84,22 @@ done
 IFS=$oldIFS
 if [ $httpd_is_running = 1 ];then
 	ml_echo 'httpd service is running'
+	s=$(service httpd stop | grep "no pid file")
+	if [ -n "$s" ]; then
+		ml_echo "$s"
+		s=$(ps aux | grep "httpd")
+		local oldIFS=$IFS
+		IFS=$'\r\n'
+		for row in $s; do
+			if [[ "$row" = *httpd\ -k\ start* ]]; then
+				s2="$(echo "$row" | grep -o "^\w\{1,\} \{1,\}\w\{1,\}")"
+				s2=${s2##* }
+				kill $s2
+				echo "$s2 is killed"
+			fi
+		done
+		IFS=$oldIFS
+	fi
 else
 	ml_echo 'starting httpd service'
 	service httpd start
