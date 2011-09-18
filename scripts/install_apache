@@ -71,6 +71,20 @@ else
 	############## install end
 fi
 
+
+# add dav conf
+gitroot=/var/www/git
+s=`cat $http_dir/conf/httpd.conf|grep DavLockDB`
+if [ -z "$s" ]; then
+	cat $dconf/httpd-dav.conf >> $http_dir/conf/httpd.conf
+	ml_echo "creating $gitroot"
+	mkdir -p $gitroot
+	ml_echo "$($http_dir/bin/htpasswd -bc $gitroot/user.passwd admin Admin)"
+fi
+chown -R daemon:daemon $gitroot
+chmod -R 0764 $gitroot
+
+
 s=`ps aux|grep httpd`
 httpd_is_running=0
 oldIFS=$IFS
@@ -100,6 +114,7 @@ if [ $httpd_is_running = 1 ];then
 		done
 		IFS=$oldIFS
 	fi
+	service httpd start
 else
 	ml_echo 'starting httpd service'
 	service httpd start
