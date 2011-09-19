@@ -114,6 +114,7 @@ if [ $httpd_is_running = 1 ];then
 		done
 		IFS=$oldIFS
 	fi
+	sleep 1
 	service httpd start
 else
 	ml_echo 'starting httpd service'
