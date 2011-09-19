@@ -79,7 +79,9 @@ if [ -z "$s" ]; then
 	cat $dconf/httpd-dav.conf >> $http_dir/conf/httpd.conf
 	ml_echo "creating $gitroot"
 	mkdir -p $gitroot
-	ml_echo "$($http_dir/bin/htpasswd -bc $gitroot/user.passwd admin Admin)"
+	ml_echo "$($http_dir/bin/htpasswd -bc $gitroot/user.passwd admin Admin 2>&1)"
+else
+	ml_echo "DavLockDB is existing in httpd.conf"
 fi
 chown -R daemon:daemon $gitroot
 chmod -R 0764 $gitroot
@@ -96,23 +98,28 @@ for row in $s; do
 	fi
 done
 IFS=$oldIFS
-if [ $httpd_is_running = 1 ];then
+if [ $httpd_is_running = 1 ]; then
 	ml_echo 'httpd service is running'
-	s=$(service httpd stop | grep "no pid file")
+	s="$(service httpd stop)"
 	if [ -n "$s" ]; then
-		ml_echo "$s"
-		s=$(ps aux | grep "httpd")
-		local oldIFS=$IFS
-		IFS=$'\r\n'
-		for row in $s; do
-			if [[ "$row" = *httpd\ -k\ start* ]]; then
-				s2="$(echo "$row" | grep -o "^\w\{1,\} \{1,\}\w\{1,\}")"
-				s2=${s2##* }
-				kill $s2
-				echo "$s2 is killed"
-			fi
-		done
-		IFS=$oldIFS
+		s="$(echo "$s" | grep "no pid file")"
+		if [ -n "$s" ]; then
+			s=$(ps aux | grep "httpd")
+			oldIFS=$IFS
+			IFS=$'\r\n'
+			for row in $s; do
+				if [[ "$row" = *httpd\ -k\ start* ]]; then
+					s2="$(echo "$row" | grep -o "^\w\{1,\} \{1,\}\w\{1,\}")"
+					s2=${s2##* }
+					kill $s2
+					ml_echo "$s2 is killed"
+					sleep 1
+					s2="$(ps aux | grep "httpd")"
+					[ -z "$s2" ] && break
+				fi
+			done
+			IFS=$oldIFS
+		fi
 	fi
 	sleep 1
 	service httpd start
