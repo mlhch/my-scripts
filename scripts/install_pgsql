@@ -7,7 +7,8 @@
 pg_type="tar"	# currently we focus on tar source
 pg_src="$base_dir/common/pgsql"
 pg_tar=$(latest_tar $pg_src postgresql-)
-pg_v="${pg_tar%.tar.*}"
+pg_v="${pg_tar%.tar.*}";
+[ $? = 1 ] && ml_echo "$pg_v" && exit 1
 if [ -n "$__pgsql_dir" ]; then
 	pg_dir="$__pgsql_dir"
 else
@@ -15,7 +16,7 @@ else
 fi
 
 pg_bin="$pg_dir/bin/psql"
-pg_tmp="$tmp_dir/postgresql-9.0.3"
+pg_tmp="$tmp_dir/$pg_v"
 pg_datadir="/var/www/pgdata"
 
 flex_bz="flex-2.5.35.tar.bz2"
@@ -95,7 +96,7 @@ else
 		if [ ! -d "$pg_tmp" ];then
 			ml_echo "extracting $pg_tar..."
 			check_exists $pg_src/$pg_tar
-			tar -xf $pg_src/$pg_tar
+			tar -xzf $pg_src/$pg_tar
 		fi
 		
 		# ERROR 1: checking for flex... configure: WARNING:
@@ -372,11 +373,14 @@ cd $droot
 if [ -d "$droot/phpPgAdmin" ]; then
 	ml_echo "phpPgAdmin is installed"
 else
+	mkdir -p $base_dir/tools
 	pga="$(ls $base_dir/tools | grep phpPgAdmin)"
 	check_exists $base_dir/tools/$pga
 	ml_echo "extracting $pga..."
-	unzip $base_dir/tools/$pga > /dev/null
-	mv ${pga%.zip} phpPgAdmin
+	#unzip $base_dir/tools/$pga > /dev/null
+	#mv ${pga%.zip} phpPgAdmin
+	tar xf $base_dir/tools/$pga > /dev/null
+	mv ${pga%.tar.*} phpPgAdmin
 	ml_echo "set extra_login_security to false"
 	cp -f $dconf/phpPgAdmin.config.inc.php $droot/phpPgAdmin/conf/config.inc.php
 fi

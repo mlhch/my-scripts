@@ -9,6 +9,10 @@ for arg in $*; do
 	if [ "$arg" = "--with-mysql" ]; then
 		. $base_dir/scripts/install_mysql
 	fi
+	if [ "$arg" = "--with-pgsql" ]; then
+		. $base_dir/scripts/install_pgsql
+		__enable_pgsql=1
+	fi
 done
 
 if [ -z "$http_dir" ]; then
@@ -29,7 +33,7 @@ php_dir="/usr/local/$php_v"
 conf_file="$dconf/httpd.conf"
 libxml2_dir="$base_dir/php/libxml2-2.7.8"
 libxml2_file="$base_dir/php/libxml2-sources-2.7.8.tar.gz.gz"
-apache_dir="/usr/local/apache-2.2.17"
+
 if [ "$1" = "-f" ];then
 	ml_echo "removing $php_dir..."
 	rm -rf $php_dir
@@ -55,7 +59,9 @@ install_php() {
 	    ## easy.h should be in <curl-dir>/include/curl/
 		check_deps "libcurl-devel"
 	else
-		check_deps "curl-devel"
+		# seems CentOS 6.0 changes to libcurl-devel too
+		#check_deps "curl-devel"
+		check_deps "libcurl-devel"
 	fi
 	
 	cd $tmp_dir/$php_v
@@ -101,8 +107,8 @@ else
 	mv $f "$f.mlbak"
 	
 	s=$(cat $conf_file)
-	s=${s//httpd-2.2.17/$http_v}
-	s=${s//php-5.2.17/$php_v}
+	s=${s//httpd-2.2.19/$http_v}
+	s=${s//php-5.2.19/$php_v}
 	echo "$s" > $f
 	
 	ml_echo "$f is updated"
@@ -162,8 +168,12 @@ else
 	cd $droot
 	mkdir -p $base_dir/tools
 	pma="$(ls $base_dir/tools | grep phpMyAdmin)"
-	check_exists $base_dir/tools/$pma
-	ml_echo "extracting $pma..."
-	tar xf $base_dir/tools/$pma > /dev/null
-	mv ${pma%.tar.*} phpMyAdmin
+	if [ -n "$pma" ]; then
+		check_exists $base_dir/tools/$pma
+		ml_echo "extracting $pma..."
+		tar xf $base_dir/tools/$pma > /dev/null
+		mv ${pma%.tar.*} phpMyAdmin
+	else
+		ml_echo "phpMyAdmin does not exist"
+	fi
 fi
