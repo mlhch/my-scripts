@@ -34,13 +34,20 @@ configure_mysql() {
 	chown -R mysql .
 	chgrp -R mysql .
 	chmod -R 0777 /tmp
-	
-	./scripts/mysql_install_db --user=mysql	> /dev/null
 	chown -R root .
 	chown -R mysql data
-	cp ./support-files/my-medium.cnf /etc/my.cnf
+	
+	# may cause 'service mysql start' failure
+	#cp ./support-files/my-medium.cnf /etc/my.cnf
+	# use our own
+	#cp $dconf/my-medium.cnf /etc/my.cnf
+	rm -f /etc/my.cnf
+	
 	cp ./support-files/mysql.server /etc/init.d/mysql
 	chmod +x /etc/init.d/mysql
+	
+	./scripts/mysql_install_db --user=mysql	> /dev/null
+	
 	# service method make it synchronous
  	#bin/mysqld_safe --user=mysql &
 	service mysql start

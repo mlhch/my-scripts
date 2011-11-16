@@ -76,7 +76,7 @@ fi
 gitroot=/var/www/git
 s=`cat $http_dir/conf/httpd.conf|grep DavLockDB`
 if [ -z "$s" ]; then
-	check_exist "$dconf/httpd-dav.conf"
+	check_exists "$dconf/httpd-dav.conf"
 	cat $dconf/httpd-dav.conf >> $http_dir/conf/httpd.conf
 	ml_echo "creating $gitroot"
 	mkdir -p $gitroot
@@ -92,7 +92,7 @@ chmod -R 0764 $gitroot
 #   httpd: Could not reliably determine the server's fully qualified domain name, using ::1 for ServerName
 s=`cat $http_dir/conf/httpd.conf | grep -oP "^[ 	]*ServerName[ 	]+[^ ]+$"`
 if [ -z "$s" ]; then
-	echo.
+	echo ""
 	echo "ServerName 127.0.0.1:80" >> $http_dir/conf/httpd.conf
 	ml_echo "Add ServerName line to avoid error message"
 else

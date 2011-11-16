@@ -5,13 +5,16 @@
 for arg in $*; do
 	if [ "$arg" = "--with-http" ]; then
 		. $base_dir/scripts/install_apache
+		cd $base_dir/scripts
 	fi
 	if [ "$arg" = "--with-mysql" ]; then
 		. $base_dir/scripts/install_mysql
+		cd $base_dir/scripts
 	fi
 	if [ "$arg" = "--with-pgsql" ]; then
 		. $base_dir/scripts/install_pgsql
 		__enable_pgsql=1
+		cd $base_dir/scripts
 	fi
 done
 
@@ -167,7 +170,7 @@ if [ -d "$droot/phpMyAdmin" ]; then
 else
 	cd $droot
 	mkdir -p $base_dir/tools
-	pma="$(ls $base_dir/tools | grep phpMyAdmin)"
+	pma="$(latest_tar $base_dir/tools phpMyAdmin)"
 	if [ -n "$pma" ]; then
 		check_exists $base_dir/tools/$pma
 		ml_echo "extracting $pma..."
